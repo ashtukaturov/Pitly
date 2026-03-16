@@ -1,45 +1,91 @@
 namespace Pitly.Core.Models;
 
+/// <summary>
+/// Maps calculated tax values to actual PIT-38(17) form field positions (poz.).
+/// Field numbers match the official form published by the Polish Ministry of Finance.
+/// </summary>
 public record Pit38Fields(
     int Year,
-    decimal C20Przychody,
-    decimal C21Koszty,
-    decimal C22DochodStrata,
-    decimal C23PodstawaObliczenia,
-    decimal C24Podatek19,
-    decimal D25PrzychodyDywidendy,
-    decimal D26ZryczaltowanyPodatek19,
-    decimal E27PodatekZaplaconyZagranica,
-    decimal E28PodatekDoZaplaty,
-    decimal TotalTaxOwed)
+
+    // ── Section C: Dochody / Straty — art. 30b ust. 1 ustawy ──
+    // Row 1 (poz. 20-21): Przychody wykazane w PIT-8C — always 0 for foreign brokers
+    // Row 2 (poz. 22-23): Inne przychody — this is where IB income goes
+    decimal Poz22Przychody,
+    decimal Poz23Koszty,
+    // Row 3 (poz. 24-25): Razem = sum of rows 1+2 (equal to 22-23 since row 1 is empty)
+    decimal Poz24RazemPrzychody,
+    decimal Poz25RazemKoszty,
+    // Poz. 26: Dochód (gain), only if proceeds > costs, otherwise 0
+    decimal Poz26Dochod,
+    // Poz. 27: Strata (loss as positive number), only if costs > proceeds, otherwise 0
+    decimal Poz27Strata,
+
+    // ── Section D: Obliczenie zobowiązania podatkowego — art. 30b ust. 1 ustawy ──
+    // Poz. 29: Podstawa obliczenia podatku (rounded to full PLN per art. 63 § 1 O.p.)
+    decimal Poz29PodstawaObliczenia,
+    // Poz. 31: Podatek = poz. 29 × 19%
+    decimal Poz31Podatek,
+    // Poz. 33: Podatek należny (rounded to full PLN)
+    decimal Poz33PodatekNalezny,
+
+    // ── Section G: Podatek do zapłaty / Nadpłata ──
+    // Poz. 45: Zryczałtowany podatek 19% od dywidend zagranicznych (art. 30a ust. 1 pkt 1-5)
+    decimal Poz45ZryczaltowanyPodatek,
+    // Poz. 46: Podatek zapłacony za granicą (capped at poz. 45, per art. 30a ust. 9)
+    decimal Poz46PodatekZaplaconyZaGranica,
+    // Poz. 47: Różnica = poz. 45 − poz. 46 (rounded to full PLN)
+    decimal Poz47Roznica,
+    // Poz. 49: PODATEK DO ZAPŁATY = poz. 33 + poz. 47
+    decimal Poz49PodatekDoZaplaty,
+
+    // ── Informational (not a PIT-38 field — shown for user reference) ──
+    decimal TotalDividendsPln)
 {
-    private const decimal TAX_RATE = 0.19m;
+    private const decimal TaxRate = 0.19m;
 
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
-        var c22 = summary.CapitalGainPln;
-        var c23 = c22 > 0 ? c22 : 0;
-        var c24 = summary.CapitalGainTaxPln;
+        // Section C — Capital gains
+        var przychody = summary.TotalProceedsPln;
+        var koszty = summary.TotalCostPln;
+        var difference = przychody - koszty;
+        var dochod = Math.Round(Math.Max(difference, 0), 2);
+        var strata = Math.Round(Math.Max(-difference, 0), 2);
 
-        var d25 = summary.TotalDividendsPln;
-        var d26 = Math.Round(d25 * TAX_RATE, 2);
+        // Section D — Tax calculation
+        var podstawa = RoundToFullPln(dochod);
+        var podatek = Math.Round(podstawa * TaxRate, 2);
+        var podatekNalezny = RoundToFullPln(podatek);
 
-        var e27 = Math.Round(Math.Min(summary.TotalWithholdingPln, d26), 2);
-        var e28 = Math.Round(Math.Max(d26 - e27, 0), 2);
+        // Section G — Dividends
+        var zryczaltowanyPodatek = Math.Round(summary.TotalDividendsPln * TaxRate, 2);
+        var podatekZaGranica = Math.Round(Math.Min(summary.TotalWithholdingPln, zryczaltowanyPodatek), 2);
+        var roznica = RoundToFullPln(Math.Max(zryczaltowanyPodatek - podatekZaGranica, 0));
 
-        var totalTax = c24 + e28;
+        var podatekDoZaplaty = podatekNalezny + roznica;
 
         return new Pit38Fields(
             Year: summary.Year,
-            C20Przychody: summary.TotalProceedsPln,
-            C21Koszty: summary.TotalCostPln,
-            C22DochodStrata: c22,
-            C23PodstawaObliczenia: c23,
-            C24Podatek19: c24,
-            D25PrzychodyDywidendy: d25,
-            D26ZryczaltowanyPodatek19: d26,
-            E27PodatekZaplaconyZagranica: e27,
-            E28PodatekDoZaplaty: e28,
-            TotalTaxOwed: totalTax);
+            Poz22Przychody: przychody,
+            Poz23Koszty: koszty,
+            Poz24RazemPrzychody: przychody,
+            Poz25RazemKoszty: koszty,
+            Poz26Dochod: dochod,
+            Poz27Strata: strata,
+            Poz29PodstawaObliczenia: podstawa,
+            Poz31Podatek: podatek,
+            Poz33PodatekNalezny: podatekNalezny,
+            Poz45ZryczaltowanyPodatek: zryczaltowanyPodatek,
+            Poz46PodatekZaplaconyZaGranica: podatekZaGranica,
+            Poz47Roznica: roznica,
+            Poz49PodatekDoZaplaty: podatekDoZaplaty,
+            TotalDividendsPln: summary.TotalDividendsPln);
     }
+
+    /// <summary>
+    /// Rounds to full PLN per art. 63 § 1 Ordynacji podatkowej:
+    /// amounts below 50 groszy are dropped, 50+ groszy rounded up.
+    /// </summary>
+    private static decimal RoundToFullPln(decimal value)
+        => Math.Round(value, 0, MidpointRounding.AwayFromZero);
 }

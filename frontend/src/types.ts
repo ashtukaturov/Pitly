@@ -41,16 +41,24 @@ export interface TaxSummary {
 
 export interface Pit38Fields {
   year: number;
-  c20_Przychody: number;
-  c21_Koszty: number;
-  c22_DochodStrata: number;
-  c23_PodstawaObliczenia: number;
-  c24_Podatek19: number;
-  d25_PrzychodyDywidendy: number;
-  d26_ZryczaltowanyPodatek19: number;
-  e27_PodatekZaplaconyZagranica: number;
-  e28_PodatekDoZaplaty: number;
-  totalTaxOwed: number;
+  // Section C
+  poz22Przychody: number;
+  poz23Koszty: number;
+  poz24RazemPrzychody: number;
+  poz25RazemKoszty: number;
+  poz26Dochod: number;
+  poz27Strata: number;
+  // Section D
+  poz29PodstawaObliczenia: number;
+  poz31Podatek: number;
+  poz33PodatekNalezny: number;
+  // Section G
+  poz45ZryczaltowanyPodatek: number;
+  poz46PodatekZaplaconyZaGranica: number;
+  poz47Roznica: number;
+  poz49PodatekDoZaplaty: number;
+  // Informational
+  totalDividendsPln: number;
 }
 
 export interface ImportResponse {
