@@ -124,6 +124,12 @@ A sample statement is provided at [`samples/sample-activity-statement.csv`](samp
 - Does not submit PIT-38 electronically — you enter the values yourself
 - Always verify results and consult a tax advisor if unsure
 
+## Support
+
+If you find Pitly useful, consider buying me a coffee:
+
+<a href="https://buymeacoffee.com/volodymyr_kovtun" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="48"></a>
+
 ## License
 
 [MIT](LICENSE)
