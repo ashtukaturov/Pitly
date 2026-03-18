@@ -2,11 +2,11 @@ import { NavLink } from 'react-router-dom';
 import { Upload, LayoutDashboard, ArrowLeftRight, Coins, FileText } from 'lucide-react';
 
 const nav = [
-  { to: '/', icon: Upload, label: 'Import' },
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/transactions', icon: ArrowLeftRight, label: 'Transactions' },
-  { to: '/dividends', icon: Coins, label: 'Dividends' },
-  { to: '/pit38', icon: FileText, label: 'PIT-38 Guide' },
+  { to: '/app', icon: Upload, label: 'Import' },
+  { to: '/app/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/app/transactions', icon: ArrowLeftRight, label: 'Transactions' },
+  { to: '/app/dividends', icon: Coins, label: 'Dividends' },
+  { to: '/app/pit38', icon: FileText, label: 'PIT-38 Guide' },
 ];
 
 export default function Sidebar({ year }: { year: number | null }) {
@@ -24,7 +24,7 @@ export default function Sidebar({ year }: { year: number | null }) {
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
+            end={to === '/app'}
             className={({ isActive }) =>
               `flex items-center gap-3 px-5 py-2.5 text-sm transition-colors whitespace-nowrap ${
                 isActive
