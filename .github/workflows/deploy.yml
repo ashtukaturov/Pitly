@@ -176,3 +176,7 @@ jobs:
 
               sleep 5
             done
+
+            echo "Pruning old Docker images and build cache..."
+            docker image prune -f
+            docker builder prune -f
