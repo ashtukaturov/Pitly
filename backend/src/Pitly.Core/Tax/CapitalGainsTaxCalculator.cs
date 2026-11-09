@@ -1,3 +1,4 @@
+using System.Globalization;
 using Pitly.Core.Models;
 using Pitly.Core.Services;
 
@@ -5,7 +6,8 @@ namespace Pitly.Core.Tax;
 
 public interface ICapitalGainsTaxCalculator
 {
-    Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod);
+    /// <summary>Computes FIFO results; when <paramref name="warnings"/> is given, consistency checks are appended to it.</summary>
+    Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null);
 }
 
 public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
@@ -25,13 +27,23 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         public required IReadOnlyDictionary<string, decimal> CarryInByKey { get; init; }
         public List<TradeResult> Results { get; } = [];
         public Dictionary<string, LinkedList<Lot>> BuyLots { get; } = new(StringComparer.OrdinalIgnoreCase);
+        // Old lot key -> current key after a split with a new ISIN, an ISIN change or a merger moved the lots.
+        // Statements often keep mapping the ticker to the old ISIN for a while, so later trades still resolve.
+        public Dictionary<string, string> KeyAliases { get; } = new(StringComparer.OrdinalIgnoreCase);
+        // Lot key -> last symbol seen for it, for messages
+        public Dictionary<string, string> KeySymbols { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<string>? Warnings { get; init; }
+        public bool OpeningPositionsChecked { get; set; }
     }
 
-    public async Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod)
+    private const decimal PositionTolerance = 0.001m;
+
+    public async Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null)
     {
         var ctx = new Context
         {
             TaxPeriod = taxPeriod,
+            Warnings = warnings,
             CarryInByKey = (statement.CarryInPositions ?? [])
                 .Where(p => p.Year == taxPeriod.Year)
                 .GroupBy(GetLotKey, StringComparer.OrdinalIgnoreCase)
@@ -46,8 +58,16 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
             .ThenBy(e => e.Trade is null ? 0 : 1)
             .ToList();
 
+        foreach (var position in (statement.CarryInPositions ?? []).Where(p => p.Year == taxPeriod.Year))
+            ctx.KeySymbols.TryAdd(GetLotKey(position), position.Symbol);
+
+        var yearStart = new DateTime(taxPeriod.Year, 1, 1);
         foreach (var timelineEvent in events)
         {
+            // Once the timeline reaches the tax year, the lots must equal the broker's opening positions.
+            if (!ctx.OpeningPositionsChecked && timelineEvent.DateTime >= yearStart)
+                CheckOpeningPositions(ctx);
+
             if (timelineEvent.Action is not null)
             {
                 await ApplyCorporateActionAsync(timelineEvent.Action, ctx);
@@ -57,13 +77,17 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
             await ProcessTradeAsync(timelineEvent.Trade!, ctx, note: null);
         }
 
+        if (!ctx.OpeningPositionsChecked)
+            CheckOpeningPositions(ctx);
+
         return ctx.Results;
     }
 
     private async Task ProcessTradeAsync(Trade trade, Context ctx, string? note)
     {
         var rate = await _rateService.GetRateAsync(trade.Currency, trade.DateTime);
-        var lotKey = GetLotKey(trade);
+        var lotKey = ResolveAlias(ctx, GetLotKey(trade));
+        ctx.KeySymbols[lotKey] = trade.Symbol;
         var lots = GetOrCreateLots(ctx.BuyLots, lotKey);
 
         if (trade.Type == TradeType.Buy)
@@ -154,8 +178,9 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
     {
         // Lots may be keyed by ISIN or, when the statement had no instrument info, by symbol. Resolve the source
         // to whichever key actually holds lots so a split or rename still finds them.
-        var sourceKey = ResolveExistingKey(ctx.BuyLots, action.EffectiveSourceIsin, action.EffectiveSourceSymbol);
+        var sourceKey = ResolveAlias(ctx, ResolveExistingKey(ctx.BuyLots, action.EffectiveSourceIsin, action.EffectiveSourceSymbol));
         var targetKey = GetLotKey(action);
+        ctx.KeySymbols.TryAdd(targetKey, action.Symbol);
         var currency = string.IsNullOrWhiteSpace(action.Currency) ? "USD" : action.Currency;
 
         switch (action.Type)
@@ -166,13 +191,13 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 if (factor <= 0)
                     throw new InvalidOperationException(
                         $"Unsupported stock split ratio for {action.Symbol} on {action.DateTime:yyyy-MM-dd}.");
-                MoveLots(ctx.BuyLots, sourceKey, targetKey);
+                MoveLots(ctx, sourceKey, targetKey);
                 ScaleLots(ctx.BuyLots, targetKey, factor);
                 break;
             }
 
             case CorporateActionType.IsinChange:
-                MoveLots(ctx.BuyLots, sourceKey, targetKey);
+                MoveLots(ctx, sourceKey, targetKey);
                 break;
 
             case CorporateActionType.StockMerger:
@@ -181,7 +206,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 if (factor <= 0)
                     throw new InvalidOperationException(
                         $"Unsupported exchange ratio in merger of {action.EffectiveSourceSymbol} into {action.Symbol} on {action.DateTime:yyyy-MM-dd}.");
-                MoveLots(ctx.BuyLots, sourceKey, targetKey);
+                MoveLots(ctx, sourceKey, targetKey);
                 ScaleLots(ctx.BuyLots, targetKey, factor);
                 if (action.CashProceeds > 0)
                 {
@@ -296,6 +321,51 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
             Note: note + " (no matching lots, zero cost)"));
     }
 
+    /// <summary>
+    /// Compares the lots reconstructed from uploaded trades with the positions the tax-year statement reports at the
+    /// start of the year (IB Mark-to-Market "Prior Quantity"). A mismatch usually means a year with trades or a stock
+    /// split is missing from the upload, or a corporate action was not recognised.
+    /// </summary>
+    private static void CheckOpeningPositions(Context ctx)
+    {
+        ctx.OpeningPositionsChecked = true;
+        if (ctx.Warnings is null || ctx.CarryInByKey.Count == 0)
+            return;
+
+        var year = ctx.TaxPeriod.Year;
+        var reconstructed = ctx.BuyLots
+            .Where(kv => kv.Value.Count > 0)
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Sum(l => l.Quantity), StringComparer.OrdinalIgnoreCase);
+        var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, priorQuantity) in ctx.CarryInByKey.OrderBy(kv => kv.Key))
+        {
+            var resolved = ResolveAlias(ctx, key);
+            matched.Add(resolved);
+            reconstructed.TryGetValue(resolved, out var have);
+            if (Math.Abs(have - priorQuantity) <= PositionTolerance)
+                continue;
+
+            var symbol = ctx.KeySymbols.TryGetValue(resolved, out var s) ? s : key;
+            ctx.Warnings.Add(string.Format(CultureInfo.InvariantCulture,
+                "Position check for {0}: {1} shares of {2} were reconstructed from the uploaded trades, but the statement reports {3} shares at the start of {0}. A statement for a year with trades or a stock split is probably missing, or a corporate action was not recognised; the cost basis of {2} sales may be wrong.",
+                year, Fmt(have), symbol, Fmt(priorQuantity)));
+        }
+
+        foreach (var (key, have) in reconstructed.OrderBy(kv => kv.Key))
+        {
+            if (have <= PositionTolerance || matched.Contains(key))
+                continue;
+
+            var symbol = ctx.KeySymbols.TryGetValue(key, out var s) ? s : key;
+            ctx.Warnings.Add(string.Format(CultureInfo.InvariantCulture,
+                "Position check for {0}: {1} shares of {2} were reconstructed from earlier statements, but the {0} statement shows no such position at the start of the year. A sale or corporate action in a missing year may have closed it.",
+                year, Fmt(have), symbol));
+        }
+    }
+
+    private static string Fmt(decimal quantity) => quantity.ToString("0.####", CultureInfo.InvariantCulture);
+
     private static LinkedList<Lot> GetOrCreateLots(Dictionary<string, LinkedList<Lot>> buyLots, string key)
     {
         if (!buyLots.TryGetValue(key, out var lots))
@@ -319,17 +389,31 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         return isin;
     }
 
-    private static void MoveLots(Dictionary<string, LinkedList<Lot>> buyLots, string sourceKey, string targetKey)
+    private static string ResolveAlias(Context ctx, string key)
+    {
+        var guard = 0;
+        while (ctx.KeyAliases.TryGetValue(key, out var next) && guard++ < 16)
+            key = next;
+        return key;
+    }
+
+    private static void MoveLots(Context ctx, string sourceKey, string targetKey)
     {
         if (string.Equals(sourceKey, targetKey, StringComparison.OrdinalIgnoreCase))
             return;
-        if (!buyLots.TryGetValue(sourceKey, out var source) || source.Count == 0)
+
+        // From now on anything booked under the old identifier belongs to the new one, even if no lots were open.
+        ctx.KeyAliases[sourceKey] = targetKey;
+        foreach (var alias in ctx.KeyAliases.Where(kv => string.Equals(kv.Value, sourceKey, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList())
+            ctx.KeyAliases[alias] = targetKey;
+
+        if (!ctx.BuyLots.TryGetValue(sourceKey, out var source) || source.Count == 0)
             return;
 
-        var target = GetOrCreateLots(buyLots, targetKey);
+        var target = GetOrCreateLots(ctx.BuyLots, targetKey);
         foreach (var lot in source)
             target.AddLast(lot);
-        buyLots.Remove(sourceKey);
+        ctx.BuyLots.Remove(sourceKey);
     }
 
     private static void ScaleLots(Dictionary<string, LinkedList<Lot>> buyLots, string key, decimal factor)

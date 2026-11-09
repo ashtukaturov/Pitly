@@ -87,6 +87,10 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
           pit38: result.pit38,
           trades: result.trades,
           dividends: result.dividends,
+          files: allFiles,
+          availableYears: result.availableYears,
+          residencyStartDate: residencyStartDate || undefined,
+          priorYearLosses: lossCheck.losses,
         });
       }, 600);
     } catch (err: unknown) {

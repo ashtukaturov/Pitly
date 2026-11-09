@@ -1,3 +1,4 @@
+using System.Globalization;
 using Pitly.Api.Data;
 using Pitly.Api.Mapping;
 using Pitly.Core.Models;
@@ -24,7 +25,8 @@ public class ImportService : IImportService
     public async Task<ImportResult> ImportStatementsAsync(
         IReadOnlyList<Stream> fileStreams,
         DateTime? residencyStartDate = null,
-        IReadOnlyList<PriorYearLoss>? priorYearLosses = null)
+        IReadOnlyList<PriorYearLoss>? priorYearLosses = null,
+        int? taxYear = null)
     {
         if (fileStreams.Count == 0)
             throw new FormatException("No files uploaded.");
@@ -49,7 +51,8 @@ public class ImportService : IImportService
                 parsed.CorporateActions?.Count ?? 0);
         }
 
-        var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate);
+        var availableYears = statements.Select(GetStatementYear).Distinct().OrderBy(y => y).ToList();
+        var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate, taxYear);
         var merged = MergeStatements(statements, taxPeriod.Year);
 
         if (merged.Trades.Count == 0 && merged.Dividends.Count == 0 && merged.WithholdingTaxes.Count == 0 &&
@@ -78,7 +81,7 @@ public class ImportService : IImportService
         await _db.SaveChangesAsync();
 
         _logger.LogInformation("Session {SessionId} saved", session.Id);
-        return new ImportResult(session.Id, summary);
+        return new ImportResult(session.Id, summary, availableYears);
     }
 
     private static int DetermineTargetYear(IReadOnlyList<ParsedStatement> statements)
@@ -98,17 +101,37 @@ public class ImportService : IImportService
 
     private static TaxPeriod DetermineTaxPeriod(
         IReadOnlyList<ParsedStatement> statements,
-        DateTime? residencyStartDate)
+        DateTime? residencyStartDate,
+        int? requestedYear)
     {
         var targetYear = DetermineTargetYear(statements);
+        if (requestedYear is not null)
+        {
+            var years = statements.Select(GetStatementYear).Distinct().OrderBy(y => y).ToList();
+            if (!years.Contains(requestedYear.Value))
+            {
+                throw new FormatException(
+                    "Tax year " + requestedYear.Value + " is not covered by the uploaded statements (" + string.Join(", ", years) + "). " +
+                    "Upload the statement for that year, or pick one of the listed years.");
+            }
+
+            targetYear = requestedYear.Value;
+        }
+
         if (residencyStartDate is null)
             return TaxPeriod.FullYear(targetYear);
 
         var taxableFrom = residencyStartDate.Value.Date;
-        if (taxableFrom.Year != targetYear)
+
+        // Residency that started in an earlier year means the whole target year is taxable in Poland.
+        if (taxableFrom.Year < targetYear)
+            return TaxPeriod.FullYear(targetYear);
+
+        if (taxableFrom.Year > targetYear)
         {
             throw new FormatException(
-                $"Residency start date {taxableFrom:yyyy-MM-dd} must fall within the imported tax year {targetYear}.");
+                "Polish tax residency starts on " + taxableFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) +
+                ", so there is nothing to declare in Poland for " + targetYear + ". Pick " + taxableFrom.Year + " or a later year.");
         }
 
         return new TaxPeriod(targetYear, taxableFrom, new DateTime(targetYear, 12, 31));

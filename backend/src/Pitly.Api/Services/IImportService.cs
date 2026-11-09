@@ -7,7 +7,9 @@ public interface IImportService
     Task<ImportResult> ImportStatementsAsync(
         IReadOnlyList<Stream> fileStreams,
         DateTime? residencyStartDate = null,
-        IReadOnlyList<PriorYearLoss>? priorYearLosses = null);
+        IReadOnlyList<PriorYearLoss>? priorYearLosses = null,
+        int? taxYear = null);
 }
 
-public record ImportResult(Guid SessionId, TaxSummary Summary);
+/// <param name="AvailableYears">Statement years found in the upload; any of them can be requested as the tax year.</param>
+public record ImportResult(Guid SessionId, TaxSummary Summary, IReadOnlyList<int> AvailableYears);

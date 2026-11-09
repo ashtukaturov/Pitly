@@ -189,4 +189,71 @@ public class CorporateActionCalculatorTests
         Assert.Equal(150m, sale.ProceedsPln);
         Assert.Equal(120m, sale.CostPln);
     }
+
+    [Fact]
+    public async Task ReverseSplitWithNewIsin_StillFindsLotsWhenLaterTradeCarriesTheOldIsin()
+    {
+        // IB keeps mapping the ticker to the old ISIN in the same statement, so the post-split sell may arrive
+        // under the old identifier. It must resolve to the moved lots instead of failing with "no buy lots".
+        var statement = new ParsedStatement(
+            Trades:
+            [
+                Buy("SPCE", "US92766K1060", new DateTime(2021, 4, 29, 12, 27, 10), 20m, 22.035m),
+                Sell("SPCE", "US92766K1060", new DateTime(2024, 7, 2, 9, 33, 29), 1m, 7.9m)
+            ],
+            Dividends: [],
+            WithholdingTaxes: [],
+            CorporateActions:
+            [
+                new CorporateAction("SPCE", new DateTime(2024, 6, 14, 20, 25, 0), CorporateActionType.StockSplit, 1m, 20m,
+                    Isin: "US92766K4031", SourceSymbol: "SPCE.OLD", SourceIsin: "US92766K1060")
+            ]);
+
+        var results = await NewCalculator().CalculateAsync(statement, TaxPeriod.FullYear(2024));
+
+        var sell = Assert.Single(results);
+        Assert.Equal(7.9m, sell.ProceedsPln);
+        Assert.Equal(440.7m, sell.CostPln);
+    }
+
+    [Fact]
+    public async Task OpeningPositionCheck_WarnsWhenLotsDisagreeWithStatementPriorQuantity()
+    {
+        // One share bought in 2024, a 4-for-1 split missing from the upload: the 2025 statement reports 4 shares
+        // at the start of the year while the lots only hold 1.
+        var statement = new ParsedStatement(
+            Trades: [Buy("IBKR", "US45841N1072", new DateTime(2024, 12, 20), 1m, 100m)],
+            Dividends: [],
+            WithholdingTaxes: [],
+            CarryInPositions: [new CarryInPosition("IBKR", 4m, 2025, "US45841N1072")]);
+
+        var warnings = new List<string>();
+        await NewCalculator().CalculateAsync(statement, TaxPeriod.FullYear(2025), warnings);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("Position check for 2025", warning);
+        Assert.Contains("1 shares of IBKR", warning);
+        Assert.Contains("reports 4 shares", warning);
+    }
+
+    [Fact]
+    public async Task OpeningPositionCheck_IsSilentWhenLotsMatchAndFlagsPositionsMissingFromStatement()
+    {
+        var statement = new ParsedStatement(
+            Trades:
+            [
+                Buy("GOOG", "US02079K1079", new DateTime(2024, 3, 1), 10m, 150m),
+                Buy("SPCE", "US92766K1060", new DateTime(2024, 4, 1), 20m, 22m)
+            ],
+            Dividends: [],
+            WithholdingTaxes: [],
+            CarryInPositions: [new CarryInPosition("GOOG", 10m, 2025, "US02079K1079")]);
+
+        var warnings = new List<string>();
+        await NewCalculator().CalculateAsync(statement, TaxPeriod.FullYear(2025), warnings);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("20 shares of SPCE", warning);
+        Assert.Contains("no such position", warning);
+    }
 }

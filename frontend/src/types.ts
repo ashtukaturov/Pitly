@@ -109,6 +109,8 @@ export interface Pit38Fields {
 
 export interface ImportResponse {
   sessionId: string;
+  /** Statement years found in the upload; any of them can be chosen as the tax year. */
+  availableYears: number[];
   summary: TaxSummary;
   pit38: Pit38Fields;
   trades: TradeResult[];
@@ -128,4 +130,9 @@ export interface AppState {
   pit38: Pit38Fields | null;
   trades: TradeResult[];
   dividends: DividendResult[];
+  // Kept so the same upload can be recalculated for another tax year without re-selecting files
+  files: File[];
+  availableYears: number[];
+  residencyStartDate?: string;
+  priorYearLosses: PriorYearLossInput[];
 }

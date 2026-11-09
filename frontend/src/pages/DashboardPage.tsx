@@ -1,12 +1,24 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { TrendingUp, Coins, Landmark, CreditCard, AlertTriangle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { formatPln, numColor, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState } from '../types';
 import EmptyState from '../components/EmptyState';
 
-export default function DashboardPage({ state }: { state: AppState }) {
+export default function DashboardPage({
+  state,
+  onRecalculate,
+  switchingYear = false,
+  yearError = null,
+}: {
+  state: AppState;
+  onRecalculate?: (options: { year?: number; residencyStartDate?: string }) => void;
+  switchingYear?: boolean;
+  yearError?: string | null;
+}) {
   const { summary, trades } = state;
+  const [residencyDraft, setResidencyDraft] = useState(state.residencyStartDate ?? '');
+  const residencyChanged = (residencyDraft || undefined) !== (state.residencyStartDate || undefined);
 
   const monthlyData = useMemo(() => {
     const months: Record<string, { proceeds: number; costs: number }> = {};
@@ -78,10 +90,61 @@ export default function DashboardPage({ state }: { state: AppState }) {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-white text-2xl font-bold">Dashboard — Tax Year {summary.year}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-white text-2xl font-bold">Dashboard — Tax Year {summary.year}</h1>
+          {state.availableYears.length > 1 && onRecalculate && (
+            <label className="no-print flex items-center gap-2 text-sm text-slate-400">
+              <span>Switch year:</span>
+              <select
+                value={summary.year}
+                disabled={switchingYear}
+                onChange={(e) => onRecalculate({ year: Number(e.target.value) })}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                aria-label="Tax year"
+              >
+                {state.availableYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {onRecalculate && state.files.length > 0 && (
+            <form
+              className="no-print flex items-center gap-2 text-sm text-slate-400"
+              onSubmit={(e) => { e.preventDefault(); onRecalculate({ residencyStartDate: residencyDraft || undefined }); }}
+            >
+              <span>Polish tax residency from:</span>
+              <input
+                type="date"
+                value={residencyDraft}
+                disabled={switchingYear}
+                onChange={(e) => setResidencyDraft(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                aria-label="Polish tax residency start date"
+              />
+              <button
+                type="submit"
+                disabled={switchingYear || !residencyChanged}
+                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Recalculate
+              </button>
+            </form>
+          )}
+          {switchingYear && <span className="text-slate-500 text-sm">Recalculating…</span>}
+        </div>
+        {yearError && (
+          <p className="text-red-400 text-sm mt-2">{yearError}</p>
+        )}
         <p className="text-slate-400 text-sm mt-1">
           Taxable period: {formatTaxPeriod(summary.taxableFrom, summary.taxableTo)}
         </p>
+        {state.availableYears.length > 1 && (
+          <p className="text-slate-500 text-sm mt-1">
+            Statements uploaded for {state.availableYears.join(', ')}. Earlier years are replayed for FIFO history; pick the
+            year you are declaring above.
+          </p>
+        )}
         {customTaxPeriod && (
           <p className="text-slate-500 text-sm mt-1">
             Earlier uploaded trades are still replayed internally to reconstruct FIFO lots and corporate actions.

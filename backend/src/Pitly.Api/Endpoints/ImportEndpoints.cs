@@ -38,6 +38,15 @@ public static class ImportEndpoints
             if (!PriorYearLossJson.TryParseInput(form["priorYearLosses"].FirstOrDefault(), out var priorYearLosses, out var lossError))
                 return Results.BadRequest(new { error = lossError });
 
+            int? taxYear = null;
+            var taxYearRaw = form["taxYear"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(taxYearRaw))
+            {
+                if (!int.TryParse(taxYearRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedTaxYear) || parsedTaxYear < 1990 || parsedTaxYear > 2100)
+                    return Results.BadRequest(new { error = "Tax year must be a four-digit year." });
+                taxYear = parsedTaxYear;
+            }
+
             var files = form.Files
                 .Where(f => f.Length > 0)
                 .ToList();
@@ -60,7 +69,7 @@ public static class ImportEndpoints
                 var streams = files.Select(file => file.OpenReadStream()).ToList();
                 try
                 {
-                    var result = await importService.ImportStatementsAsync(streams, residencyStartDate, priorYearLosses);
+                    var result = await importService.ImportStatementsAsync(streams, residencyStartDate, priorYearLosses, taxYear);
                     // Single source of truth for the form values: computed here with decimal arithmetic
                     // instead of being re-derived on the frontend with floating point.
                     var pit38 = Pit38Fields.FromSummary(result.Summary);
@@ -68,6 +77,7 @@ public static class ImportEndpoints
                     return Results.Ok(new
                     {
                         sessionId = result.SessionId,
+                        availableYears = result.AvailableYears,
                         summary = new
                         {
                             result.Summary.TotalProceedsPln,

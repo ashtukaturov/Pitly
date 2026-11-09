@@ -22,7 +22,8 @@ public class TaxCalculator : ITaxCalculator
 
     public async Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod)
     {
-        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod);
+        var warnings = new List<string>(statement.Warnings ?? []);
+        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, warnings);
         var dividendsTask = _dividendTaxCalculator.CalculateAsync(
             statement.Dividends.Where(d => taxPeriod.IncludesDate(d.Date)).ToList(),
             statement.WithholdingTaxes.Where(t => taxPeriod.IncludesDate(t.Date)).ToList());
@@ -57,6 +58,6 @@ public class TaxCalculator : ITaxCalculator
             TaxableTo: taxPeriod.TaxableTo,
             TradeResults: tradeResults,
             Dividends: dividends,
-            Warnings: statement.Warnings ?? []);
+            Warnings: warnings);
     }
 }

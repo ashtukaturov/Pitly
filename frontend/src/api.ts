@@ -2,11 +2,12 @@ import type { ImportResponse, TradesPage, DividendResult, TaxSummary, Pit38Field
 
 const BASE = '/api';
 
-function buildImportForm(files: File[], residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[]): FormData {
+function buildImportForm(files: File[], residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[], taxYear?: number): FormData {
   const form = new FormData();
   files.forEach(file => form.append('files', file));
   if (residencyStartDate) form.append('residencyStartDate', residencyStartDate);
   if (priorYearLosses && priorYearLosses.length > 0) form.append('priorYearLosses', JSON.stringify(priorYearLosses));
+  if (taxYear) form.append('taxYear', String(taxYear));
   return form;
 }
 
@@ -14,8 +15,8 @@ export async function importFile(file: File, residencyStartDate?: string, priorY
   return importFiles([file], residencyStartDate, priorYearLosses);
 }
 
-export async function importFiles(files: File[], residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[]): Promise<ImportResponse> {
-  const form = buildImportForm(files, residencyStartDate, priorYearLosses);
+export async function importFiles(files: File[], residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[], taxYear?: number): Promise<ImportResponse> {
+  const form = buildImportForm(files, residencyStartDate, priorYearLosses, taxYear);
   const res = await fetch(`${BASE}/import`, { method: 'POST', body: form });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Import failed' }));
