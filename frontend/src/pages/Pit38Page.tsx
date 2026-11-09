@@ -1,14 +1,36 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 import { Printer, FileText, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { formatPln, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState, Pit38Fields } from '../types';
 import EmptyState from '../components/EmptyState';
-import { useT } from '../i18n';
+import { useT, type TFunction } from '../i18n';
 
 // All PIT-38 values come from the backend (Pit38Fields.FromSummary, decimal arithmetic).
 // Nothing is re-derived here with floating point.
-export default function Pit38Page({ state }: { state: AppState }) {
+// Translation function that also knows the field numbers of the form version for this tax year, so dictionary
+// strings can say "poz. {straty}" instead of hard-coding PIT-38(18) numbers.
+function usePit38T(pit38: Pit38Fields | null): TFunction {
   const t = useT();
+  const f = pit38?.form;
+  return useCallback<TFunction>(
+    (key, params) => t(key, {
+      version: f?.version ?? 18,
+      straty: f?.straty ?? 30,
+      podstawa: f?.podstawa ?? 31,
+      podatek: f?.podatek ?? 33,
+      nalezny: f?.podatekNalezny ?? 35,
+      zrycz: f?.zryczaltowany ?? 47,
+      zaplacony: f?.zaplacony ?? 48,
+      roznica: f?.roznica ?? 49,
+      doZaplaty: f?.doZaplaty ?? 51,
+      ...params,
+    }),
+    [t, f],
+  );
+}
+
+export default function Pit38Page({ state }: { state: AppState }) {
+  const t = usePit38T(state.pit38);
   const pit38 = state.pit38;
 
   if (!state.sessionId || !state.summary || !pit38) {
@@ -102,10 +124,10 @@ export default function Pit38Page({ state }: { state: AppState }) {
 
       <Section title={t('pit38.sectionD.title')}>
         <FieldTable rows={[
-          { poz: '30', name: t('pit38.sectionD.poz30.name'), value: pit38.poz30StratyZLatUbieglych, note: t('pit38.sectionD.poz30.note') },
-          { poz: '31', name: t('pit38.sectionD.poz31.name'), value: pit38.poz31PodstawaObliczenia, note: t('pit38.sectionD.poz31.note') },
-          { poz: '33', name: t('pit38.sectionD.poz33.name'), value: pit38.poz33Podatek },
-          { poz: '35', name: t('pit38.sectionD.poz35.name'), value: pit38.poz35PodatekNalezny, note: t('pit38.sectionD.poz35.note') },
+          { poz: String(pit38.form.straty), name: t('pit38.sectionD.poz30.name'), value: pit38.poz30StratyZLatUbieglych, note: t('pit38.sectionD.poz30.note') },
+          { poz: String(pit38.form.podstawa), name: t('pit38.sectionD.poz31.name'), value: pit38.poz31PodstawaObliczenia, note: t('pit38.sectionD.poz31.note') },
+          { poz: String(pit38.form.podatek), name: t('pit38.sectionD.poz33.name'), value: pit38.poz33Podatek },
+          { poz: String(pit38.form.podatekNalezny), name: t('pit38.sectionD.poz35.name'), value: pit38.poz35PodatekNalezny, note: t('pit38.sectionD.poz35.note') },
         ]} />
         <PriorYearLossBreakdown pit38={pit38} />
       </Section>
@@ -117,18 +139,18 @@ export default function Pit38Page({ state }: { state: AppState }) {
           <span className="text-slate-600 text-xs ml-2">{t('pit38.sectionG.informational')}</span>
         </div>
         <FieldTable rows={[
-          { poz: '47', name: t('pit38.sectionG.poz47.name'), value: pit38.poz47ZryczaltowanyPodatek },
-          { poz: '48', name: t('pit38.sectionG.poz48.name'), value: pit38.poz48PodatekZaplaconyZaGranica, note: t('pit38.sectionG.poz48.note') },
-          { poz: '49', name: t('pit38.sectionG.poz49.name'), value: pit38.poz49Roznica, note: t('pit38.sectionG.poz49.note') },
+          { poz: String(pit38.form.zryczaltowany), name: t('pit38.sectionG.poz47.name'), value: pit38.poz47ZryczaltowanyPodatek },
+          { poz: String(pit38.form.zaplacony), name: t('pit38.sectionG.poz48.name'), value: pit38.poz48PodatekZaplaconyZaGranica, note: t('pit38.sectionG.poz48.note') },
+          { poz: String(pit38.form.roznica), name: t('pit38.sectionG.poz49.name'), value: pit38.poz49Roznica, note: t('pit38.sectionG.poz49.note') },
         ]} />
       </Section>
 
       <div className="bg-blue-500/10 border-2 border-blue-500 rounded-xl p-8 text-center">
         <FileText className="w-10 h-10 text-blue-400 mx-auto mb-3" />
-        <p className="text-slate-500 text-xs font-mono mb-1">Poz. 51</p>
+        <p className="text-slate-500 text-xs font-mono mb-1">Poz. {pit38.form.doZaplaty}</p>
         <p className="text-blue-300 text-sm mb-1">{t('pit38.total.label')}</p>
         <p className="text-white text-3xl font-bold font-mono tabular-nums">{formatPln(pit38.poz51PodatekDoZaplaty)}</p>
-        <p className="text-slate-400 text-xs mt-1">= poz. 35 + poz. 49</p>
+        <p className="text-slate-400 text-xs mt-1">= poz. {pit38.form.podatekNalezny} + poz. {pit38.form.roznica}</p>
         <p className="text-slate-400 text-sm mt-2">{t('pit38.total.deadline', { date: deadline })}</p>
       </div>
 
@@ -204,7 +226,7 @@ function Val({ v }: { v: number }) {
 }
 
 function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: number; hasDividends: boolean }) {
-  const t = useT();
+  const t = usePit38T(pit38);
   const [open, setOpen] = useState(false);
   const hasCapitalGains = pit38.poz22Przychody > 0 || pit38.poz23Koszty > 0;
   const clickNext = (
@@ -453,7 +475,7 @@ function GuideStep({ n, title, children }: { n: number; title: string; children:
 
 // Per-year check of the prior-year losses entered at import (computed by PriorYearLossCalculator on the backend).
 function PriorYearLossBreakdown({ pit38 }: { pit38: Pit38Fields }) {
-  const t = useT();
+  const t = usePit38T(pit38);
   if (pit38.priorYearLosses.length === 0 && pit38.warnings.length === 0) return null;
   const th = 'text-slate-500 text-xs font-medium px-3 py-2';
   const td = 'px-3 py-2 font-mono tabular-nums text-right';
@@ -522,7 +544,7 @@ function PriorYearLossBreakdown({ pit38 }: { pit38: Pit38Fields }) {
 
 // PIT/ZG annex: art. 30b income per issuer country, computed on the backend (CountryBreakdown).
 function PitZgSection({ pit38 }: { pit38: Pit38Fields }) {
-  const t = useT();
+  const t = usePit38T(pit38);
   const rows = pit38.pitZg;
   if (rows.length === 0) return null;
   const capitalRows = rows.filter(r => r.saleCount > 0);

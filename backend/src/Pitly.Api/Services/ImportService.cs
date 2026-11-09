@@ -68,7 +68,7 @@ public class ImportService : IImportService
                 parsed.CorporateActions?.Count ?? 0);
         }
 
-        var availableYears = statements.Select(GetStatementYear).Distinct().OrderBy(y => y).ToList();
+        var availableYears = statements.SelectMany(GetCoveredYears).Distinct().OrderBy(y => y).ToList();
         var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate, taxYear);
         var merged = StatementMerger.Merge(
             statements.Zip(names, (statement, name) => new StatementMerger.NamedStatement(name, statement)).ToList(),
@@ -127,7 +127,7 @@ public class ImportService : IImportService
         var targetYear = DetermineTargetYear(statements);
         if (requestedYear is not null)
         {
-            var years = statements.Select(GetStatementYear).Distinct().OrderBy(y => y).ToList();
+            var years = statements.SelectMany(GetCoveredYears).Distinct().OrderBy(y => y).ToList();
             if (!years.Contains(requestedYear.Value))
             {
                 throw new FormatException(
@@ -155,6 +155,19 @@ public class ImportService : IImportService
         }
 
         return new TaxPeriod(targetYear, taxableFrom, new DateTime(targetYear, 12, 31));
+    }
+
+    /// <summary>Every year the statement has data for: a Trading 212 export can span several years.</summary>
+    private static IEnumerable<int> GetCoveredYears(ParsedStatement statement)
+    {
+        var years = statement.Trades.Select(t => t.DateTime.Year)
+            .Concat(statement.Dividends.Select(d => d.Date.Year))
+            .Concat(statement.WithholdingTaxes.Select(t => t.Date.Year))
+            .Concat((statement.CorporateActions ?? []).Select(a => a.DateTime.Year))
+            .ToList();
+        if (statement.StatementYear is not null)
+            years.Add(statement.StatementYear.Value);
+        return years.Distinct();
     }
 
     private static int GetStatementYear(ParsedStatement statement)

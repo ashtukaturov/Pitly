@@ -40,7 +40,7 @@ export const importPage: Translations = {
     'import.t212Step6': '6. Upload one or more yearly CSVs together if you need prior-year FIFO history',
     'import.t212Step7': '7. Stock splits are read from the paired "Stock split close" / "Stock split open" rows, so export the full period that contains both.',
 
-    'losses.title': 'Prior-year capital losses (PIT-38 poz. 30)',
+    'losses.title': 'Prior-year capital losses (PIT-38)',
     'losses.intro': 'Optional. For each earlier year in which your PIT-38 showed a loss (poz. "Strata"), enter the loss and how much of it you have already deducted in the years since. Pitly checks each entry against the 5-year carry-forward window and the per-year limits, deducts the oldest losses first and caps the total at this year\'s income.',
     'losses.colYear': 'Loss year',
     'losses.colLoss': 'Loss (PLN)',
@@ -66,6 +66,8 @@ export const importPage: Translations = {
     'losses.errorDeductedNegative': 'Prior-year loss for {year}: the already-deducted amount must be zero or positive.',
     'losses.errorDeductedExceeds': 'Prior-year loss for {year}: the already-deducted amount cannot exceed the loss.',
     'losses.errorTooMany': 'At most {max} prior-year loss entries are supported.',
+    'losses.colOneOff': 'One-off deduction already used',
+    'losses.oneOffHint': 'Tick if you already deducted this loss in one go (up to 5 000 000 zl) in an earlier year; then at most 50% per year remains.',
   },
   uk: {
     'import.title': 'Імпорт виписки про операції',
@@ -106,7 +108,7 @@ export const importPage: Translations = {
     'import.t212Step6': '6. Завантажте один або кілька річних CSV разом, якщо потрібна історія FIFO за попередні роки',
     'import.t212Step7': '7. Спліти акцій зчитуються з парних рядків "Stock split close" / "Stock split open", тому експортуйте повний період, що містить обидва.',
 
-    'losses.title': 'Збитки минулих років (PIT-38 poz. 30)',
+    'losses.title': 'Збитки минулих років (PIT-38)',
     'losses.intro': 'Необов’язково. Для кожного попереднього року, в якому ваш PIT-38 показав збиток (poz. "Strata"), вкажіть суму збитку та скільки з нього ви вже вирахували в наступних роках. Pitly перевіряє кожен запис щодо 5-річного вікна перенесення та річних лімітів, вираховує спочатку найстаріші збитки й обмежує загальну суму доходом цього року.',
     'losses.colYear': 'Рік збитку',
     'losses.colLoss': 'Збиток (PLN)',
@@ -132,6 +134,8 @@ export const importPage: Translations = {
     'losses.errorDeductedNegative': 'Збиток за {year} рік: уже вирахована сума має бути нулем або додатною.',
     'losses.errorDeductedExceeds': 'Збиток за {year} рік: уже вирахована сума не може перевищувати збиток.',
     'losses.errorTooMany': 'Підтримується щонайбільше {max} записів про збитки минулих років.',
+    'losses.colOneOff': 'Одноразове відрахування вже використано',
+    'losses.oneOffHint': 'Позначте, якщо ви вже списали цей збиток одноразово (до 5 000 000 zł) у попередньому році; тоді лишається не більше 50% на рік.',
   },
   pl: {
     'import.title': 'Import zestawienia operacji',
@@ -172,7 +176,7 @@ export const importPage: Translations = {
     'import.t212Step6': '6. Prześlij razem jeden lub więcej rocznych plików CSV, jeśli potrzebna jest historia FIFO z lat ubiegłych',
     'import.t212Step7': '7. Splity akcji są odczytywane ze sparowanych wierszy "Stock split close" / "Stock split open", więc wyeksportuj pełny okres zawierający oba.',
 
-    'losses.title': 'Straty z lat ubiegłych (PIT-38 poz. 30)',
+    'losses.title': 'Straty z lat ubiegłych (PIT-38)',
     'losses.intro': 'Opcjonalne. Dla każdego wcześniejszego roku, w którym PIT-38 wykazał stratę (poz. "Strata"), podaj stratę oraz kwotę już odliczoną w kolejnych latach. Pitly sprawdza każdy wpis pod kątem 5-letniego okresu rozliczenia i rocznych limitów, odlicza najpierw najstarsze straty i ogranicza sumę do dochodu z tego roku.',
     'losses.colYear': 'Rok straty',
     'losses.colLoss': 'Strata (PLN)',
@@ -198,5 +202,7 @@ export const importPage: Translations = {
     'losses.errorDeductedNegative': 'Strata za {year} r.: kwota już odliczona musi być zerem lub dodatnia.',
     'losses.errorDeductedExceeds': 'Strata za {year} r.: kwota już odliczona nie może przekraczać straty.',
     'losses.errorTooMany': 'Obsługiwanych jest maksymalnie {max} wpisów strat z lat ubiegłych.',
+    'losses.colOneOff': 'Jednorazowe odliczenie już wykorzystane',
+    'losses.oneOffHint': 'Zaznacz, jeśli odliczyłeś już tę stratę jednorazowo (do 5 000 000 zł) w którymś z wcześniejszych lat; wtedy pozostaje najwyżej 50% rocznie.',
   },
 };

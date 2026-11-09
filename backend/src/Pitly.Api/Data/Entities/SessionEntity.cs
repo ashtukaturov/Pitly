@@ -22,6 +22,8 @@ public class SessionEntity
     public string? WarningsJson { get; set; }
     // Income by country for PIT/ZG (JSON array of CountryIncome)
     public string? CountriesJson { get; set; }
+    public decimal TotalInterestPln { get; set; }
+    public decimal TotalInterestCreditableWithholdingPln { get; set; }
 
     public List<TradeResultEntity> TradeResults { get; set; } = [];
     public List<DividendEntity> Dividends { get; set; } = [];

@@ -44,6 +44,7 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var hasDividends = false;
         var hasWithholding = false;
         var hasAccountInfo = false;
+        string? accountId = null;
         int? statementYear = null;
 
         foreach (var rawLine in lines)
@@ -63,6 +64,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
                     break;
                 case "Account Information":
                     hasAccountInfo = true;
+                    if (fields.Count >= 4 && Clean(fields[1]) == "Data" && Clean(fields[2]) == "Account")
+                        accountId = Clean(fields[3]);
                     break;
                 case "Trades":
                     hasTrades = true;
@@ -111,7 +114,7 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             warnings.Add(
                 $"{yearLabel} statement contains no trades, dividends, interest or corporate actions (only cash movements such as deposits). " +
                 "There is nothing to declare from it.");
-            return new ParsedStatement([], [], [], [], [], statementYear, warnings);
+            return new ParsedStatement([], [], [], [], [], statementYear, warnings, accountId);
         }
 
         foreach (var fields in tradeRows)
@@ -146,7 +149,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             corporateActions,
             carryInPositions,
             statementYear,
-            warnings);
+            warnings,
+            accountId);
     }
 
     private void TryParseTrade(

@@ -58,7 +58,10 @@ public record Pit38Fields(
     IReadOnlyList<string> Warnings,
 
     // PIT/ZG annex: art. 30b income per issuer country (dividend figures included for reference only)
-    IReadOnlyList<CountryIncome> PitZg)
+    IReadOnlyList<CountryIncome> PitZg,
+
+    // Field numbers of the form version that applies to Year (PIT-38(17) up to 2024, PIT-38(18) from 2025)
+    Pit38FormLayout Form)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
@@ -82,10 +85,22 @@ public record Pit38Fields(
         // Section G — Dividends, interest, payments in lieu
         // Poz. 47/49 fall under art. 30a ust. 1 — per art. 63 § 1a Ordynacji podatkowej
         // (footnote 8 on PIT-38(18)), amounts are rounded to full groszy upward, not full PLN.
-        var zryczaltowanyPodatek = RoundToGroszUp(summary.TotalDividendsPln * TaxConstants.TaxRate);
-        // Only the treaty-capped (creditable) part of foreign withholding may be entered in poz. 48.
-        var podatekZaGranica = Math.Round(Math.Min(summary.TotalCreditableWithholdingPln, zryczaltowanyPodatek), 2);
-        var roznica = RoundToGroszUp(Math.Max(zryczaltowanyPodatek - podatekZaGranica, 0));
+        // Art. 63 par. 1a O.p. (grosz rounding upward) covers only art. 30a ust. 1 pkt 1-3, i.e. interest. Dividends and
+        // payments in lieu (pkt 4) follow the general rule of par. 1: full PLN. The two streams are rounded separately
+        // and then added, which is how the single form field is meant to be filled (footnote 5 on the form).
+        var interestPln = Math.Max(summary.TotalInterestPln, 0m);
+        var dividendPln = Math.Max(summary.TotalDividendsPln - interestPln, 0m);
+        var interestCreditable = Math.Max(summary.TotalInterestCreditableWithholdingPln, 0m);
+        var dividendCreditable = Math.Max(summary.TotalCreditableWithholdingPln - interestCreditable, 0m);
+
+        var dividendTax = RoundToFullPln(dividendPln * TaxConstants.TaxRate);
+        var interestTax = RoundToGroszUp(interestPln * TaxConstants.TaxRate);
+        var zryczaltowanyPodatek = dividendTax + interestTax;
+        // Only the treaty-capped (creditable) part of foreign withholding may be entered as tax paid abroad.
+        var dividendCredit = Math.Round(Math.Min(dividendCreditable, dividendTax), 2);
+        var interestCredit = Math.Round(Math.Min(interestCreditable, interestTax), 2);
+        var podatekZaGranica = dividendCredit + interestCredit;
+        var roznica = RoundToFullPln(Math.Max(dividendTax - dividendCredit, 0)) + RoundToGroszUp(Math.Max(interestTax - interestCredit, 0));
 
         var podatekDoZaplaty = podatekNalezny + roznica;
 
@@ -115,7 +130,8 @@ public record Pit38Fields(
             TotalDividendsPln: summary.TotalDividendsPln,
             PriorYearLosses: lossResult.Lines,
             Warnings: lossResult.Warnings,
-            PitZg: summary.Countries ?? []);
+            PitZg: summary.Countries ?? [],
+            Form: Pit38FormLayout.ForYear(summary.Year));
     }
 
     /// <summary>

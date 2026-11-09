@@ -31,26 +31,28 @@ public static class StatementMerger
         var carryIns = new List<CarryInPosition>();
         var statementWarnings = new List<string>();
 
-        var seenTrades = new Dictionary<(string, string, string, DateTime, decimal, decimal, decimal, decimal, TradeType), int>();
-        var seenDividends = new Dictionary<(string, string, string, DateTime, decimal, IncomeKind), int>();
-        var seenWithholding = new Dictionary<(string, string, string, DateTime, decimal, IncomeKind), int>();
-        var seenActions = new Dictionary<(DateTime, CorporateActionType, string, string, string, string, decimal, decimal, decimal, decimal), int>();
-        var seenCarryIns = new Dictionary<(string, string, int), int>();
+        var seenTrades = new Dictionary<(string, string, string, string, DateTime, decimal, decimal, decimal, decimal, TradeType), int>();
+        var seenDividends = new Dictionary<(string, string, string, string, DateTime, decimal, IncomeKind), int>();
+        var seenWithholding = new Dictionary<(string, string, string, string, DateTime, decimal, IncomeKind), int>();
+        var seenActions = new Dictionary<(string, DateTime, CorporateActionType, string, string, string, string, decimal, decimal, decimal, decimal), int>();
+        var seenCarryIns = new Dictionary<(string, string, string, int), int>();
 
         foreach (var (name, statement) in ordered)
         {
+            // The same dividend on the same day can legitimately occur on two accounts; only rows of one account dedupe.
+            var acct = (statement.AccountId ?? string.Empty).ToUpperInvariant();
             var skippedTrades = TakeNew(statement.Trades, trades, seenTrades,
-                t => (t.Symbol.ToUpperInvariant(), t.Isin ?? string.Empty, t.Currency, t.DateTime, t.Quantity, t.Price, t.Proceeds, t.Commission, t.Type));
+                t => (acct, t.Symbol.ToUpperInvariant(), t.Isin ?? string.Empty, t.Currency, t.DateTime, t.Quantity, t.Price, t.Proceeds, t.Commission, t.Type));
             var skippedDividends = TakeNew(statement.Dividends, dividends, seenDividends,
-                d => (d.Symbol.ToUpperInvariant(), d.Isin ?? string.Empty, d.Currency, d.Date, d.Amount, d.Kind));
+                d => (acct, d.Symbol.ToUpperInvariant(), d.Isin ?? string.Empty, d.Currency, d.Date, d.Amount, d.Kind));
             var skippedWithholding = TakeNew(statement.WithholdingTaxes, withholding, seenWithholding,
-                w => (w.Symbol.ToUpperInvariant(), w.Isin ?? string.Empty, w.Currency, w.Date, w.Amount, w.Kind));
+                w => (acct, w.Symbol.ToUpperInvariant(), w.Isin ?? string.Empty, w.Currency, w.Date, w.Amount, w.Kind));
             var skippedActions = TakeNew(statement.CorporateActions ?? [], actions, seenActions,
-                a => (a.DateTime, a.Type, a.Symbol.ToUpperInvariant(), a.Isin ?? string.Empty, a.SourceSymbol ?? string.Empty, a.SourceIsin ?? string.Empty, a.Numerator, a.Denominator, a.Quantity, a.CashProceeds),
+                a => (acct, a.DateTime, a.Type, a.Symbol.ToUpperInvariant(), a.Isin ?? string.Empty, a.SourceSymbol ?? string.Empty, a.SourceIsin ?? string.Empty, a.Numerator, a.Denominator, a.Quantity, a.CashProceeds),
                 allowRepeatsWithinFile: false);
             // One opening position per instrument and year; overlapping exports of the same year repeat it.
             var skippedCarryIns = TakeNew(statement.CarryInPositions ?? [], carryIns, seenCarryIns,
-                p => (p.Symbol.ToUpperInvariant(), p.Isin ?? string.Empty, p.Year),
+                p => (acct, p.Symbol.ToUpperInvariant(), p.Isin ?? string.Empty, p.Year),
                 allowRepeatsWithinFile: false);
 
             statementWarnings.AddRange(statement.Warnings ?? []);

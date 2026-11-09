@@ -79,6 +79,8 @@ export interface PriorYearLossInput {
   year: number;
   lossPln: number;
   deductedPln: number;
+  /** The one-off deduction (art. 9 ust. 3 pkt 2) was already used for this loss in an earlier year */
+  oneOffUsed: boolean;
 }
 
 /** Backend check of one entered loss (PriorYearLossLine). */
@@ -125,6 +127,20 @@ export interface Pit38Fields {
   warnings: string[];
   // PIT/ZG annex rows
   pitZg: CountryIncome[];
+  // Field numbers of the form version for this tax year (PIT-38(17) up to 2024, PIT-38(18) from 2025)
+  form: Pit38FormLayout;
+}
+
+export interface Pit38FormLayout {
+  version: number;
+  straty: number;
+  podstawa: number;
+  podatek: number;
+  podatekNalezny: number;
+  zryczaltowany: number;
+  zaplacony: number;
+  roznica: number;
+  doZaplaty: number;
 }
 
 export interface ImportResponse {

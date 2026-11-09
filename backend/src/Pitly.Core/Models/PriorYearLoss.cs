@@ -6,7 +6,8 @@ namespace Pitly.Core.Models;
 /// <param name="Year">Tax year in which the loss arose (the PIT-38 it was reported on).</param>
 /// <param name="LossPln">The loss as reported that year (poz. "Strata"), positive number.</param>
 /// <param name="DeductedPln">Part of that loss already deducted in the years between then and now.</param>
-public record PriorYearLoss(int Year, decimal LossPln, decimal DeductedPln = 0m);
+/// <param name="OneOffUsed">True when the one-off deduction of art. 9 ust. 3 pkt 2 was already used for this loss in an earlier year, so only 50% per year remains.</param>
+public record PriorYearLoss(int Year, decimal LossPln, decimal DeductedPln = 0m, bool OneOffUsed = false);
 
 /// <summary>Result of applying one prior-year loss to this year's income.</summary>
 public record PriorYearLossLine(

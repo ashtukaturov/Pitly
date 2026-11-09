@@ -8,7 +8,9 @@ public record ParsedStatement(
     List<CarryInPosition>? CarryInPositions = null,
     int? StatementYear = null,
     // Things the user should review: corporate actions handled with a conservative assumption, rows ignored, etc.
-    List<string>? Warnings = null);
+    List<string>? Warnings = null,
+    // Broker account the statement belongs to (IB "Account Information"); duplicates are only removed within one account
+    string? AccountId = null);
 
 /// <summary>
 /// Kind of flat-tax (art. 30a) income. All kinds are taxed at 19% and reported in the same PIT-38 field,

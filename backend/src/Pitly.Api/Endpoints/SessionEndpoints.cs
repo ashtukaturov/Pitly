@@ -80,7 +80,9 @@ public static class SessionEndpoints
                 [], [],
                 PriorYearLossJson.Deserialize(session.PriorYearLossesJson),
                 Warnings: EntityMapper.DeserializeWarnings(session.WarningsJson),
-                Countries: EntityMapper.DeserializeCountries(session.CountriesJson));
+                Countries: EntityMapper.DeserializeCountries(session.CountriesJson),
+                TotalInterestPln: session.TotalInterestPln,
+                TotalInterestCreditableWithholdingPln: session.TotalInterestCreditableWithholdingPln);
 
             var pit38 = Pit38Fields.FromSummary(summary);
             return Results.Ok(pit38);

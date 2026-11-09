@@ -25,6 +25,8 @@ public static class EntityMapper
             PriorYearLossesJson = PriorYearLossJson.Serialize(summary.PriorYearLosses),
             WarningsJson = summary.Warnings is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(summary.Warnings) : null,
             CountriesJson = summary.Countries is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(summary.Countries) : null,
+            TotalInterestPln = summary.TotalInterestPln,
+            TotalInterestCreditableWithholdingPln = summary.TotalInterestCreditableWithholdingPln,
             TradeResults = summary.TradeResults.Select(t => new TradeResultEntity
             {
                 Symbol = t.Symbol,

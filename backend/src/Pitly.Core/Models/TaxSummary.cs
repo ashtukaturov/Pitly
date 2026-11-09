@@ -19,4 +19,7 @@ public record TaxSummary(
     // Parser/calculation warnings the user should review (corporate actions treated conservatively, ignored rows).
     IReadOnlyList<string>? Warnings = null,
     // Income by issuer country for the PIT/ZG annex.
-    IReadOnlyList<CountryIncome>? Countries = null);
+    IReadOnlyList<CountryIncome>? Countries = null,
+    // Interest part of TotalDividendsPln (art. 30a ust. 1 pkt 1-3), rounded to grosz up instead of full PLN
+    decimal TotalInterestPln = 0m,
+    decimal TotalInterestCreditableWithholdingPln = 0m);

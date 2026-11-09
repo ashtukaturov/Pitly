@@ -4,7 +4,7 @@ import type { Translations } from './index';
 // language because they name fields on the official form; notes, warnings and guide text are translated.
 const en = {
   'pit38.title': 'Your PIT-38 Declaration for {year}',
-  'pit38.subtitle': 'Field numbers (poz.) match the official PIT-38(18) form.',
+  'pit38.subtitle': 'Field numbers (poz.) match the official PIT-38({version}) form.',
   'pit38.taxablePeriod': 'Taxable period: {period}',
   'pit38.exportPdf': 'Export as PDF',
   'pit38.customPeriodNote':
@@ -25,8 +25,8 @@ const en = {
   'pit38.sectionD.poz30.note':
     'Deduction of unused losses from the previous 5 years according to the entries made at import, after checking the 5-year window and the limits (art. 9 ust. 3); cannot exceed the income in poz. 26',
   'pit38.sectionD.poz31.name': 'Podstawa obliczenia podatku',
-  'pit38.sectionD.poz31.note': 'Poz. 26 minus poz. 30, rounded to full złoty',
-  'pit38.sectionD.poz33.name': 'Podatek (poz. 31 × 19%)',
+  'pit38.sectionD.poz31.note': 'Poz. 26 minus poz. {straty}, rounded to full złoty',
+  'pit38.sectionD.poz33.name': 'Podatek (poz. {podstawa} × 19%)',
   'pit38.sectionD.poz35.name': 'Podatek należny',
   'pit38.sectionD.poz35.note': 'After rounding to full złoty',
 
@@ -36,8 +36,8 @@ const en = {
   'pit38.sectionG.poz47.name': 'Zryczałtowany podatek 19% od zagranicznych dywidend, odsetek i payments in lieu',
   'pit38.sectionG.poz48.name': 'Podatek zapłacony za granicą (foreign withholding)',
   'pit38.sectionG.poz48.note':
-    'Only the part consistent with the rate in the double-taxation treaty (e.g. 15% for the USA); cannot exceed the amount in poz. 47',
-  'pit38.sectionG.poz49.name': 'Różnica (poz. 47 − poz. 48)',
+    'Only the part consistent with the rate in the double-taxation treaty (e.g. 15% for the USA); cannot exceed the amount in poz. {zrycz}',
+  'pit38.sectionG.poz49.name': 'Różnica (poz. {zrycz} − poz. {zaplacony})',
   'pit38.sectionG.poz49.note': 'Rounded up to full grosze (art. 63 § 1a O.p.)',
 
   'pit38.total.label': 'PODATEK DO ZAPŁATY',
@@ -46,11 +46,11 @@ const en = {
 
   'pit38.danina.title': 'Danina solidarnościowa (art. 30h): {amount}',
   'pit38.danina.body.before':
-    'Your capital-gains base (poz. 31) exceeds 1 000 000 zł by {amount}. The 4% solidarity levy is declared separately on ',
+    'Your capital-gains base (poz. {podstawa}) exceeds 1 000 000 zł by {amount}. The 4% solidarity levy is declared separately on ',
   'pit38.danina.body.after':
     ' and paid by {date}. Employment, business and other qualifying incomes also count toward the 1 000 000 zł threshold, so the real amount may be higher than shown here. Dividends and interest (art. 30a) are not included in the levy base.',
   'pit38.danina.notTriggered':
-    'Danina solidarnościowa (4% above 1 000 000 zł, DSF-1) is not triggered by this capital-gains income alone. If your other incomes (employment, business) push the total above the threshold, the poz. 31 amount ({amount}) counts toward it.',
+    'Danina solidarnościowa (4% above 1 000 000 zł, DSF-1) is not triggered by this capital-gains income alone. If your other incomes (employment, business) push the total above the threshold, the poz. {podstawa} amount ({amount}) counts toward it.',
 
   'pit38.fieldTable.colPoz': 'Poz.',
   'pit38.fieldTable.colName': 'Field Name',
@@ -103,19 +103,19 @@ const en = {
   'pit38.guide.step5.intro': 'This is the main tax calculation screen. Fill in the following fields from top to bottom:',
   'pit38.guide.step5.enter': 'Enter ',
   'pit38.guide.step5.loss.after':
-    " (poz. 30), computed from the losses you entered at import after checking the 5-year window and per-year limits, capped at this year's income.",
+    " (poz. {straty}), computed from the losses you entered at import after checking the 5-year window and per-year limits, capped at this year's income.",
   'pit38.guide.step5.loss.none':
     'If you have undeducted PIT-38 losses from the past 5 years, enter them on the Import page so Pitly can check the limits and fill this field. Otherwise leave empty.',
   'pit38.guide.step5.flat.label': 'Zryczałtowany podatek dochodowy',
   'pit38.guide.step5.flat.body': 'Leave empty (this is for other flat-rate taxes not withheld by a payer, poz. 44).',
   'pit38.guide.step5.foreignFlat.label': 'Zryczałtowany podatek od przychodów uzyskanych poza granicami RP',
-  'pit38.guide.step5.foreignFlat.after': ' (poz. 47)',
+  'pit38.guide.step5.foreignFlat.after': ' (poz. {zrycz})',
   'pit38.guide.step5.foreignFlat.help': 'This is 19% of your total gross dividends in PLN ({amount})',
   'pit38.guide.step5.foreignFlat.none': 'Leave empty — no foreign dividends to report.',
   'pit38.guide.step5.paidAbroad.label': 'Kwoty podatku zapłaconego za granicą (przeliczone na złote)',
-  'pit38.guide.step5.paidAbroad.after': ' (poz. 48)',
+  'pit38.guide.step5.paidAbroad.after': ' (poz. {zaplacony})',
   'pit38.guide.step5.paidAbroad.help':
-    "Foreign withholding tax deducted by your broker, converted to PLN and capped at the treaty rate for each issuer's country (e.g. 15% for US stocks). Cannot exceed poz. 47.",
+    "Foreign withholding tax deducted by your broker, converted to PLN and capped at the treaty rate for each issuer's country (e.g. 15% for US stocks). Cannot exceed poz. {zrycz}.",
   'pit38.guide.step5.rest.label': 'Suma zaliczek / Dochody zwolnione z IPO / Monthly breakdown',
   'pit38.guide.step5.rest.body': 'Leave all remaining fields empty (unless you have other specific circumstances).',
 
@@ -150,7 +150,7 @@ const en = {
   'pit38.guide.notes.nbp': 'All PLN amounts use NBP Table A mid rates from the last business day before each transaction',
   'pit38.guide.notes.zg': 'e-pity automatically generates the PIT/ZG attachment for foreign income when you submit',
 
-  'pit38.lossCheck.title': 'Prior-year losses check (poz. 30, art. 9 ust. 3)',
+  'pit38.lossCheck.title': 'Prior-year losses check (poz. {straty}, art. 9 ust. 3)',
   'pit38.lossCheck.colYear': 'Loss year',
   'pit38.lossCheck.colLoss': 'Loss',
   'pit38.lossCheck.colDeductedBefore': 'Deducted before',
@@ -172,7 +172,7 @@ const en = {
   'pit38.zg.colTaxAbroad': 'Podatek zapłacony za granicą',
   'pit38.zg.noSales': 'No sales in the taxable period, so no PIT/ZG rows for art. 30b income are needed.',
   'pit38.zg.dividendsIntro':
-    'Dividends, interest and payments in lieu by country (reference only: for PIT-38 they are not entered in PIT/ZG; the creditable withholding goes straight to poz. 48).',
+    'Dividends, interest and payments in lieu by country (reference only: for PIT-38 they are not entered in PIT/ZG; the creditable withholding goes straight to poz. {zaplacony}).',
   'pit38.zg.divColCountry': 'Kraj',
   'pit38.zg.colPayments': 'Payments',
   'pit38.zg.colGross': 'Gross (PLN)',
@@ -186,7 +186,7 @@ type Pit38Dictionary = Record<keyof typeof en, string>;
 
 const uk: Pit38Dictionary = {
   'pit38.title': 'Ваша декларація PIT-38 за {year} рік',
-  'pit38.subtitle': 'Номери полів (poz.) відповідають офіційній формі PIT-38(18).',
+  'pit38.subtitle': 'Номери полів (poz.) відповідають офіційній формі PIT-38({version}).',
   'pit38.taxablePeriod': 'Податковий період: {period}',
   'pit38.exportPdf': 'Експортувати в PDF',
   'pit38.customPeriodNote':
@@ -207,8 +207,8 @@ const uk: Pit38Dictionary = {
   'pit38.sectionD.poz30.note':
     'Відрахування невикористаних збитків за попередні 5 років згідно із записами, внесеними при імпорті, після перевірки 5-річного вікна та лімітів (art. 9 ust. 3); не може перевищувати дохід з poz. 26',
   'pit38.sectionD.poz31.name': 'Podstawa obliczenia podatku',
-  'pit38.sectionD.poz31.note': 'Poz. 26 мінус poz. 30, заокруглено до повних злотих',
-  'pit38.sectionD.poz33.name': 'Podatek (poz. 31 × 19%)',
+  'pit38.sectionD.poz31.note': 'Poz. 26 мінус poz. {straty}, заокруглено до повних злотих',
+  'pit38.sectionD.poz33.name': 'Podatek (poz. {podstawa} × 19%)',
   'pit38.sectionD.poz35.name': 'Podatek należny',
   'pit38.sectionD.poz35.note': 'Після заокруглення до повних злотих',
 
@@ -218,8 +218,8 @@ const uk: Pit38Dictionary = {
   'pit38.sectionG.poz47.name': 'Zryczałtowany podatek 19% od zagranicznych dywidend, odsetek i payments in lieu',
   'pit38.sectionG.poz48.name': 'Podatek zapłacony za granicą (податок, утриманий за кордоном)',
   'pit38.sectionG.poz48.note':
-    'Лише частина, що відповідає ставці з угоди про уникнення подвійного оподаткування (напр. 15% для США); не може перевищувати суму з poz. 47',
-  'pit38.sectionG.poz49.name': 'Różnica (poz. 47 − poz. 48)',
+    'Лише частина, що відповідає ставці з угоди про уникнення подвійного оподаткування (напр. 15% для США); не може перевищувати суму з poz. {zrycz}',
+  'pit38.sectionG.poz49.name': 'Różnica (poz. {zrycz} − poz. {zaplacony})',
   'pit38.sectionG.poz49.note': 'Заокруглено до повних грошів у більший бік (art. 63 § 1a O.p.)',
 
   'pit38.total.label': 'PODATEK DO ZAPŁATY',
@@ -228,11 +228,11 @@ const uk: Pit38Dictionary = {
 
   'pit38.danina.title': 'Danina solidarnościowa (art. 30h): {amount}',
   'pit38.danina.body.before':
-    'Ваша база доходу від капіталу (poz. 31) перевищує 1 000 000 zł на {amount}. Солідарний внесок 4% декларується окремо у формі ',
+    'Ваша база доходу від капіталу (poz. {podstawa}) перевищує 1 000 000 zł на {amount}. Солідарний внесок 4% декларується окремо у формі ',
   'pit38.danina.body.after':
     ' і сплачується до {date}. Доходи від працевлаштування, підприємницької діяльності та інші відповідні доходи також враховуються в порозі 1 000 000 zł, тож реальна сума може бути вищою за показану тут. Дивіденди та відсотки (art. 30a) до бази внеску не входять.',
   'pit38.danina.notTriggered':
-    'Danina solidarnościowa (4% понад 1 000 000 zł, DSF-1) не виникає лише через цей дохід від капіталу. Якщо ваші інші доходи (праця, підприємництво) піднімають загальну суму вище порога, сума з poz. 31 ({amount}) враховується в ній.',
+    'Danina solidarnościowa (4% понад 1 000 000 zł, DSF-1) не виникає лише через цей дохід від капіталу. Якщо ваші інші доходи (праця, підприємництво) піднімають загальну суму вище порога, сума з poz. {podstawa} ({amount}) враховується в ній.',
 
   'pit38.fieldTable.colPoz': 'Poz.',
   'pit38.fieldTable.colName': 'Назва поля',
@@ -286,19 +286,19 @@ const uk: Pit38Dictionary = {
   'pit38.guide.step5.intro': 'Це головний екран розрахунку податку. Заповніть наведені нижче поля зверху вниз:',
   'pit38.guide.step5.enter': 'Введіть ',
   'pit38.guide.step5.loss.after':
-    ' (poz. 30) — розраховано зі збитків, внесених при імпорті, після перевірки 5-річного вікна та річних лімітів, обмежено доходом цього року.',
+    ' (poz. {straty}) — розраховано зі збитків, внесених при імпорті, після перевірки 5-річного вікна та річних лімітів, обмежено доходом цього року.',
   'pit38.guide.step5.loss.none':
     'Якщо у вас є невідраховані збитки PIT-38 за останні 5 років, внесіть їх на сторінці Імпорт, щоб Pitly перевірив ліміти та заповнив це поле. Інакше залиште порожнім.',
   'pit38.guide.step5.flat.label': 'Zryczałtowany podatek dochodowy',
   'pit38.guide.step5.flat.body': 'Залиште порожнім (це поле для інших паушальних податків, не утриманих платником, poz. 44).',
   'pit38.guide.step5.foreignFlat.label': 'Zryczałtowany podatek od przychodów uzyskanych poza granicami RP',
-  'pit38.guide.step5.foreignFlat.after': ' (poz. 47)',
+  'pit38.guide.step5.foreignFlat.after': ' (poz. {zrycz})',
   'pit38.guide.step5.foreignFlat.help': 'Це 19% від загальної суми валових дивідендів у PLN ({amount})',
   'pit38.guide.step5.foreignFlat.none': 'Залиште порожнім — іноземних дивідендів для декларування немає.',
   'pit38.guide.step5.paidAbroad.label': 'Kwoty podatku zapłaconego za granicą (przeliczone na złote)',
-  'pit38.guide.step5.paidAbroad.after': ' (poz. 48)',
+  'pit38.guide.step5.paidAbroad.after': ' (poz. {zaplacony})',
   'pit38.guide.step5.paidAbroad.help':
-    'Податок, утриманий за кордоном вашим брокером, перерахований у PLN та обмежений ставкою за угодою для країни кожного емітента (напр. 15% для акцій США). Не може перевищувати poz. 47.',
+    'Податок, утриманий за кордоном вашим брокером, перерахований у PLN та обмежений ставкою за угодою для країни кожного емітента (напр. 15% для акцій США). Не може перевищувати poz. {zrycz}.',
   'pit38.guide.step5.rest.label': 'Suma zaliczek / Dochody zwolnione z IPO / помісячна розбивка',
   'pit38.guide.step5.rest.body': 'Залиште всі інші поля порожніми (якщо у вас немає інших особливих обставин).',
 
@@ -334,7 +334,7 @@ const uk: Pit38Dictionary = {
     'Усі суми в PLN розраховані за середніми курсами НБП (таблиця A) з останнього робочого дня перед кожною операцією',
   'pit38.guide.notes.zg': 'e-pity автоматично формує додаток PIT/ZG для іноземних доходів при поданні',
 
-  'pit38.lossCheck.title': 'Перевірка збитків минулих років (poz. 30, art. 9 ust. 3)',
+  'pit38.lossCheck.title': 'Перевірка збитків минулих років (poz. {straty}, art. 9 ust. 3)',
   'pit38.lossCheck.colYear': 'Рік збитку',
   'pit38.lossCheck.colLoss': 'Збиток',
   'pit38.lossCheck.colDeductedBefore': 'Відраховано раніше',
@@ -356,7 +356,7 @@ const uk: Pit38Dictionary = {
   'pit38.zg.colTaxAbroad': 'Podatek zapłacony za granicą',
   'pit38.zg.noSales': 'У податковому періоді не було продажів, тому рядки PIT/ZG для доходу за art. 30b не потрібні.',
   'pit38.zg.dividendsIntro':
-    'Дивіденди, відсотки та payments in lieu за країнами (лише довідково: для PIT-38 вони не вносяться до PIT/ZG; податок, що підлягає заліку, іде одразу до poz. 48).',
+    'Дивіденди, відсотки та payments in lieu за країнами (лише довідково: для PIT-38 вони не вносяться до PIT/ZG; податок, що підлягає заліку, іде одразу до poz. {zaplacony}).',
   'pit38.zg.divColCountry': 'Kraj',
   'pit38.zg.colPayments': 'Виплати',
   'pit38.zg.colGross': 'Брутто (PLN)',
@@ -368,7 +368,7 @@ const uk: Pit38Dictionary = {
 
 const pl: Pit38Dictionary = {
   'pit38.title': 'Twoja deklaracja PIT-38 za {year}',
-  'pit38.subtitle': 'Numery pól (poz.) odpowiadają oficjalnemu formularzowi PIT-38(18).',
+  'pit38.subtitle': 'Numery pól (poz.) odpowiadają oficjalnemu formularzowi PIT-38({version}).',
   'pit38.taxablePeriod': 'Okres podatkowy: {period}',
   'pit38.exportPdf': 'Eksportuj do PDF',
   'pit38.customPeriodNote':
@@ -389,8 +389,8 @@ const pl: Pit38Dictionary = {
   'pit38.sectionD.poz30.note':
     'Odliczenie niewykorzystanych strat z poprzednich 5 lat według wpisów z importu, po sprawdzeniu 5-letniego okna i limitów (art. 9 ust. 3); nie może przekroczyć dochodu z poz. 26',
   'pit38.sectionD.poz31.name': 'Podstawa obliczenia podatku',
-  'pit38.sectionD.poz31.note': 'Poz. 26 minus poz. 30, zaokrąglone do pełnych zł',
-  'pit38.sectionD.poz33.name': 'Podatek (poz. 31 × 19%)',
+  'pit38.sectionD.poz31.note': 'Poz. 26 minus poz. {straty}, zaokrąglone do pełnych zł',
+  'pit38.sectionD.poz33.name': 'Podatek (poz. {podstawa} × 19%)',
   'pit38.sectionD.poz35.name': 'Podatek należny',
   'pit38.sectionD.poz35.note': 'Po zaokrągleniu do pełnych zł',
 
@@ -400,8 +400,8 @@ const pl: Pit38Dictionary = {
   'pit38.sectionG.poz47.name': 'Zryczałtowany podatek 19% od zagranicznych dywidend, odsetek i payments in lieu',
   'pit38.sectionG.poz48.name': 'Podatek zapłacony za granicą (podatek u źródła)',
   'pit38.sectionG.poz48.note':
-    'Tylko część zgodna ze stawką z umowy o unikaniu podwójnego opodatkowania (np. 15% dla USA); nie może przekroczyć kwoty z poz. 47',
-  'pit38.sectionG.poz49.name': 'Różnica (poz. 47 − poz. 48)',
+    'Tylko część zgodna ze stawką z umowy o unikaniu podwójnego opodatkowania (np. 15% dla USA); nie może przekroczyć kwoty z poz. {zrycz}',
+  'pit38.sectionG.poz49.name': 'Różnica (poz. {zrycz} − poz. {zaplacony})',
   'pit38.sectionG.poz49.note': 'Zaokrąglone do pełnych groszy w górę (art. 63 § 1a O.p.)',
 
   'pit38.total.label': 'PODATEK DO ZAPŁATY',
@@ -410,11 +410,11 @@ const pl: Pit38Dictionary = {
 
   'pit38.danina.title': 'Danina solidarnościowa (art. 30h): {amount}',
   'pit38.danina.body.before':
-    'Twoja podstawa z zysków kapitałowych (poz. 31) przekracza 1 000 000 zł o {amount}. Danina solidarnościowa 4% jest deklarowana osobno na formularzu ',
+    'Twoja podstawa z zysków kapitałowych (poz. {podstawa}) przekracza 1 000 000 zł o {amount}. Danina solidarnościowa 4% jest deklarowana osobno na formularzu ',
   'pit38.danina.body.after':
     ' i płatna do {date}. Dochody z pracy, działalności gospodarczej i inne kwalifikujące się dochody również wliczają się do progu 1 000 000 zł, więc rzeczywista kwota może być wyższa niż pokazana tutaj. Dywidendy i odsetki (art. 30a) nie wchodzą do podstawy daniny.',
   'pit38.danina.notTriggered':
-    'Danina solidarnościowa (4% powyżej 1 000 000 zł, DSF-1) nie powstaje z samego tego dochodu z zysków kapitałowych. Jeśli Twoje pozostałe dochody (praca, działalność) przekroczą łącznie próg, kwota z poz. 31 ({amount}) wlicza się do niego.',
+    'Danina solidarnościowa (4% powyżej 1 000 000 zł, DSF-1) nie powstaje z samego tego dochodu z zysków kapitałowych. Jeśli Twoje pozostałe dochody (praca, działalność) przekroczą łącznie próg, kwota z poz. {podstawa} ({amount}) wlicza się do niego.',
 
   'pit38.fieldTable.colPoz': 'Poz.',
   'pit38.fieldTable.colName': 'Nazwa pola',
@@ -468,19 +468,19 @@ const pl: Pit38Dictionary = {
   'pit38.guide.step5.intro': 'To główny ekran obliczenia podatku. Wypełnij poniższe pola od góry do dołu:',
   'pit38.guide.step5.enter': 'Wpisz ',
   'pit38.guide.step5.loss.after':
-    ' (poz. 30) — obliczone ze strat wpisanych przy imporcie, po sprawdzeniu 5-letniego okna i limitów rocznych, ograniczone do dochodu z tego roku.',
+    ' (poz. {straty}) — obliczone ze strat wpisanych przy imporcie, po sprawdzeniu 5-letniego okna i limitów rocznych, ograniczone do dochodu z tego roku.',
   'pit38.guide.step5.loss.none':
     'Jeśli masz nieodliczone straty PIT-38 z ostatnich 5 lat, wpisz je na stronie Import, aby Pitly sprawdził limity i wypełnił to pole. W przeciwnym razie pozostaw puste.',
   'pit38.guide.step5.flat.label': 'Zryczałtowany podatek dochodowy',
   'pit38.guide.step5.flat.body': 'Pozostaw puste (to pole dotyczy innych podatków zryczałtowanych niepobranych przez płatnika, poz. 44).',
   'pit38.guide.step5.foreignFlat.label': 'Zryczałtowany podatek od przychodów uzyskanych poza granicami RP',
-  'pit38.guide.step5.foreignFlat.after': ' (poz. 47)',
+  'pit38.guide.step5.foreignFlat.after': ' (poz. {zrycz})',
   'pit38.guide.step5.foreignFlat.help': 'To 19% łącznych dywidend brutto w PLN ({amount})',
   'pit38.guide.step5.foreignFlat.none': 'Pozostaw puste — brak zagranicznych dywidend do wykazania.',
   'pit38.guide.step5.paidAbroad.label': 'Kwoty podatku zapłaconego za granicą (przeliczone na złote)',
-  'pit38.guide.step5.paidAbroad.after': ' (poz. 48)',
+  'pit38.guide.step5.paidAbroad.after': ' (poz. {zaplacony})',
   'pit38.guide.step5.paidAbroad.help':
-    'Podatek u źródła pobrany przez brokera, przeliczony na PLN i ograniczony do stawki z umowy dla kraju każdego emitenta (np. 15% dla akcji z USA). Nie może przekroczyć poz. 47.',
+    'Podatek u źródła pobrany przez brokera, przeliczony na PLN i ograniczony do stawki z umowy dla kraju każdego emitenta (np. 15% dla akcji z USA). Nie może przekroczyć poz. {zrycz}.',
   'pit38.guide.step5.rest.label': 'Suma zaliczek / Dochody zwolnione z IPO / rozbicie miesięczne',
   'pit38.guide.step5.rest.body': 'Pozostałe pola pozostaw puste (chyba że masz inne szczególne okoliczności).',
 
@@ -516,7 +516,7 @@ const pl: Pit38Dictionary = {
     'Wszystkie kwoty w PLN przeliczono po średnich kursach NBP (tabela A) z ostatniego dnia roboczego przed każdą transakcją',
   'pit38.guide.notes.zg': 'e-pity automatycznie generuje załącznik PIT/ZG dla dochodów zagranicznych przy wysyłce',
 
-  'pit38.lossCheck.title': 'Sprawdzenie strat z lat ubiegłych (poz. 30, art. 9 ust. 3)',
+  'pit38.lossCheck.title': 'Sprawdzenie strat z lat ubiegłych (poz. {straty}, art. 9 ust. 3)',
   'pit38.lossCheck.colYear': 'Rok straty',
   'pit38.lossCheck.colLoss': 'Strata',
   'pit38.lossCheck.colDeductedBefore': 'Odliczono wcześniej',
@@ -538,7 +538,7 @@ const pl: Pit38Dictionary = {
   'pit38.zg.colTaxAbroad': 'Podatek zapłacony za granicą',
   'pit38.zg.noSales': 'Brak sprzedaży w okresie podatkowym, więc wiersze PIT/ZG dla dochodów z art. 30b nie są potrzebne.',
   'pit38.zg.dividendsIntro':
-    'Dywidendy, odsetki i payments in lieu według kraju (tylko informacyjnie: w PIT-38 nie wpisuje się ich do PIT/ZG; podatek podlegający zaliczeniu trafia bezpośrednio do poz. 48).',
+    'Dywidendy, odsetki i payments in lieu według kraju (tylko informacyjnie: w PIT-38 nie wpisuje się ich do PIT/ZG; podatek podlegający zaliczeniu trafia bezpośrednio do poz. {zaplacony}).',
   'pit38.zg.divColCountry': 'Kraj',
   'pit38.zg.colPayments': 'Wypłaty',
   'pit38.zg.colGross': 'Brutto (PLN)',

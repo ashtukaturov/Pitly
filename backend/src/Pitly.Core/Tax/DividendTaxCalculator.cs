@@ -29,8 +29,14 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                 .Where(t => IsMatch(div, t))
                 .ToList();
 
+            // Several dividend rows can share one withholding row (same instrument, day and kind: two Trading 212
+            // rows, dividends on several lots). The withholding is split between them by amount, never counted twice.
+            var group = rawDividends.Where(d => SameGroup(d, div)).ToList();
+            var groupAmount = group.Sum(d => d.Amount);
+            var share = group.Count <= 1 ? 1m : groupAmount > 0 ? div.Amount / groupAmount : 1m / group.Count;
+
             // Corrections carry a negative amount and net against the original; a net refund leaves nothing to credit.
-            var withholdingAmount = Math.Max(matchingTaxes.Sum(t => t.Amount), 0m);
+            var withholdingAmount = Math.Max(matchingTaxes.Sum(t => t.Amount) * share, 0m);
             var withholdingCurrencies = matchingTaxes
                 .Select(t => t.Currency)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -53,7 +59,7 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                     ? rate
                     : await _rateService.GetRateAsync(tax.Currency, div.Date);
 
-                withholdingPln += tax.Amount * withholdingRate;
+                withholdingPln += tax.Amount * withholdingRate * share;
             }
             withholdingPln = Math.Max(withholdingPln, 0m);
 
@@ -80,6 +86,15 @@ public class DividendTaxCalculator : IDividendTaxCalculator
         }
 
         return results;
+    }
+
+    private static bool SameGroup(RawDividend a, RawDividend b)
+    {
+        if (a.Kind != b.Kind || a.Date != b.Date)
+            return false;
+        if (!string.IsNullOrWhiteSpace(a.Isin) || !string.IsNullOrWhiteSpace(b.Isin))
+            return string.Equals(a.Isin, b.Isin, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(a.Symbol, b.Symbol, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsMatch(RawDividend dividend, RawWithholdingTax tax)

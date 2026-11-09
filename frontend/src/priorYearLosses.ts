@@ -5,6 +5,7 @@ export interface PriorYearLossRow {
   year: string;
   loss: string;
   deducted: string;
+  oneOffUsed: boolean;
 }
 
 export const MAX_PRIOR_YEAR_LOSS_ROWS = 10;
@@ -45,7 +46,7 @@ export function validatePriorYearLossRows(rows: PriorYearLossRow[], t: TFunction
     if (deducted > loss) {
       return { losses: [], error: t('losses.errorDeductedExceeds', { year }) };
     }
-    losses.push({ year, lossPln: Math.round(loss * 100) / 100, deductedPln: Math.round(deducted * 100) / 100 });
+    losses.push({ year, lossPln: Math.round(loss * 100) / 100, deductedPln: Math.round(deducted * 100) / 100, oneOffUsed: row.oneOffUsed });
   }
   if (losses.length > MAX_PRIOR_YEAR_LOSS_ROWS) {
     return { losses: [], error: t('losses.errorTooMany', { max: MAX_PRIOR_YEAR_LOSS_ROWS }) };

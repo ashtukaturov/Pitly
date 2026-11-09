@@ -95,7 +95,7 @@ public static class PriorYearLossJson
         }
 
         losses = parsed
-            .Select(l => new PriorYearLoss(l.Year, Math.Round(l.LossPln, 2), Math.Round(l.DeductedPln, 2)))
+            .Select(l => new PriorYearLoss(l.Year, Math.Round(l.LossPln, 2), Math.Round(l.DeductedPln, 2), l.OneOffUsed))
             .OrderBy(l => l.Year)
             .ToList();
         return true;

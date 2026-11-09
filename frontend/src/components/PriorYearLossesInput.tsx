@@ -52,7 +52,7 @@ export default function PriorYearLossesInput({
   const update = (index: number, patch: Partial<PriorYearLossRow>) =>
     onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   const remove = (index: number) => onChange(rows.filter((_, i) => i !== index));
-  const add = () => onChange([...rows, { year: '', loss: '', deducted: '' }]);
+  const add = () => onChange([...rows, { year: '', loss: '', deducted: '', oneOffUsed: false }]);
 
   return (
     <div className="mb-6 bg-slate-800 border border-slate-700 rounded-xl p-5">
@@ -117,6 +117,17 @@ export default function PriorYearLossesInput({
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+                {Number(row.year) >= 2019 && (
+                  <label className="mt-1 px-1 flex items-start gap-2 text-xs text-slate-400 cursor-pointer" title={t('losses.oneOffHint')}>
+                    <input
+                      type="checkbox"
+                      checked={row.oneOffUsed}
+                      onChange={(e) => update(index, { oneOffUsed: e.target.checked })}
+                      className="mt-0.5 accent-blue-500"
+                    />
+                    <span>{t('losses.colOneOff')}</span>
+                  </label>
+                )}
                 {hint && (
                   <p className={`mt-1 px-1 text-xs ${hint.tone === 'warn' ? 'text-amber-400' : 'text-slate-500'}`}>
                     {hint.text}

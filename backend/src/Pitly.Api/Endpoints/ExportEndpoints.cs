@@ -27,12 +27,12 @@ public static class ExportEndpoints
                 sb.AppendLine(string.Join(",",
                     "Trade",
                     t.DateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    t.Symbol, t.Type,
+                    CsvQuote(t.Symbol), CsvQuote(t.Type),
                     t.Quantity.ToString(CultureInfo.InvariantCulture),
                     t.PriceOriginal.ToString(CultureInfo.InvariantCulture),
                     t.ProceedsOriginal.ToString(CultureInfo.InvariantCulture),
                     t.CommissionOriginal.ToString(CultureInfo.InvariantCulture),
-                    t.Currency,
+                    CsvQuote(t.Currency),
                     t.ExchangeRate.ToString("F4", CultureInfo.InvariantCulture),
                     t.ProceedsPln.ToString("F2", CultureInfo.InvariantCulture),
                     t.CostPln.ToString("F2", CultureInfo.InvariantCulture),
@@ -48,11 +48,11 @@ public static class ExportEndpoints
                 sb.AppendLine(string.Join(",",
                     "Dividend",
                     d.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    d.Symbol,
-                    d.Kind,
+                    CsvQuote(d.Symbol),
+                    CsvQuote(d.Kind),
                     d.AmountOriginal.ToString(CultureInfo.InvariantCulture),
                     d.WithholdingTaxOriginal.ToString(CultureInfo.InvariantCulture),
-                    d.Currency,
+                    CsvQuote(d.Currency),
                     d.ExchangeRate.ToString("F4", CultureInfo.InvariantCulture),
                     d.AmountPln.ToString("F2", CultureInfo.InvariantCulture),
                     d.WithholdingTaxPln.ToString("F2", CultureInfo.InvariantCulture),
@@ -63,6 +63,12 @@ public static class ExportEndpoints
         });
     }
 
+    /// <summary>Quotes a text field and neutralises spreadsheet formula injection (=, +, -, @, tab).</summary>
     private static string CsvQuote(string? value)
-        => string.IsNullOrEmpty(value) ? string.Empty : "\"" + value.Replace("\"", "\"\"") + "\"";
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+        var safe = "=+-@\t\r".Contains(value[0]) ? "'" + value : value;
+        return "\"" + safe.Replace("\"", "\"\"") + "\"";
+    }
 }

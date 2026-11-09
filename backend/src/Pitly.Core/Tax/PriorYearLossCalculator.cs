@@ -54,6 +54,13 @@ public static class PriorYearLossCalculator
                 maxDeductible = 0m;
                 notes.Add("This loss has already been fully deducted in earlier years.");
             }
+            else if (loss.Year >= OneOffDeductionFirstLossYear && loss.OneOffUsed)
+            {
+                // The one-off deduction was already taken in an earlier year: only the 50% rule remains.
+                maxDeductible = Math.Min(remaining, halfCap);
+                if (remaining > halfCap)
+                    notes.Add("One-off deduction already used for this loss: at most 50% of the loss (" + Fmt(halfCap) + ") may be deducted in a single year (art. 9 ust. 3 pkt 2).");
+            }
             else if (loss.Year >= OneOffDeductionFirstLossYear)
             {
                 // Pkt 2: the whole remainder in one go, up to 5 000 000 PLN. Above that limit pkt 1 still applies,
