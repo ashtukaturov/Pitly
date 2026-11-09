@@ -4,15 +4,27 @@ import { importFiles } from '../api';
 import type { AppState } from '../types';
 import PriorYearLossesInput from '../components/PriorYearLossesInput';
 import { validatePriorYearLossRows, type PriorYearLossRow } from '../priorYearLosses';
+import { useT, useLang, type Lang } from '../i18n/index';
 
 type Step = 'idle' | 'parsing' | 'rates' | 'calculating' | 'done' | 'error';
 
-const steps: { key: Step; label: string }[] = [
-  { key: 'parsing', label: 'Parsing statements...' },
-  { key: 'rates', label: 'Fetching PLN exchange rates...' },
-  { key: 'calculating', label: 'Calculating taxes...' },
-  { key: 'done', label: 'Complete!' },
+// Labels are translation keys; the component resolves them with t() so they follow the current language
+const steps: { key: Step; labelKey: string }[] = [
+  { key: 'parsing', labelKey: 'import.stepParsing' },
+  { key: 'rates', labelKey: 'import.stepRates' },
+  { key: 'calculating', labelKey: 'import.stepCalculating' },
+  { key: 'done', labelKey: 'import.stepDone' },
 ];
+
+/** Picks the plural key suffix for a count: English has one/many, Ukrainian and Polish also have a "few" form (2-4). */
+function pluralSuffix(lang: Lang, count: number): 'One' | 'Few' | 'Many' {
+  if (lang === 'en') return count === 1 ? 'One' : 'Many';
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (lang === 'uk' ? mod10 === 1 && mod100 !== 11 : count === 1) return 'One';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'Few';
+  return 'Many';
+}
 
 function HelpSection({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -44,6 +56,8 @@ export default function ImportPage({
   existingFiles?: File[];
   onStartOver?: () => void;
 }) {
+  const t = useT();
+  const { lang } = useLang();
   const [step, setStep] = useState<Step>('idle');
   const [error, setError] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -54,12 +68,12 @@ export default function ImportPage({
 
   const processFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) {
-      setError('Please upload at least one CSV file.');
+      setError(t('import.errorNoFiles'));
       return;
     }
 
     if (files.some(file => !file.name.toLowerCase().endsWith('.csv'))) {
-      setError('Please upload CSV files only.');
+      setError(t('import.errorCsvOnly'));
       return;
     }
 
@@ -77,7 +91,7 @@ export default function ImportPage({
     const timer2 = setTimeout(() => setStep('calculating'), 1200);
 
     try {
-      const lossCheck = validatePriorYearLossRows(priorYearLosses);
+      const lossCheck = validatePriorYearLossRows(priorYearLosses, t);
       if (lossCheck.error) {
         clearTimeout(timer1);
         clearTimeout(timer2);
@@ -108,9 +122,9 @@ export default function ImportPage({
       clearTimeout(timer2);
       setPendingFiles(allFiles);
       setStep('error');
-      setError(err instanceof Error ? err.message : 'Import failed');
+      setError(err instanceof Error ? err.message : t('import.errorFailed'));
     }
-  }, [onComplete, pendingFiles, existingFiles, residencyStartDate, priorYearLosses]);
+  }, [onComplete, pendingFiles, existingFiles, residencyStartDate, priorYearLosses, t]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -128,9 +142,9 @@ export default function ImportPage({
 
   return (
     <div className="max-w-2xl mx-auto mt-16">
-      <h1 className="text-white text-3xl font-bold text-center mb-2">Import Activity Statement</h1>
+      <h1 className="text-white text-3xl font-bold text-center mb-2">{t('import.title')}</h1>
       <p className="text-slate-400 text-center mb-10">
-        Upload one or more broker statements to calculate Polish taxes
+        {t('import.subtitle')}
       </p>
 
       {!isProcessing ? (
@@ -139,12 +153,14 @@ export default function ImportPage({
             <div className="mb-6 bg-slate-800 border border-blue-500/40 rounded-xl p-5 text-sm">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <span className="text-slate-200 font-medium">Already loaded: {existingFiles.length} {existingFiles.length === 1 ? 'file' : 'files'}</span>
+                  <span className="text-slate-200 font-medium">
+                    {t(`import.loaded${pluralSuffix(lang, existingFiles.length)}`, { count: existingFiles.length })}
+                  </span>
                   <span className="block text-slate-500 mt-1">
                     {existingFiles.map(f => f.name).join(', ')}
                   </span>
                   <span className="block text-slate-500 mt-1">
-                    Drop more statements below to add them; files and rows that are already present are skipped automatically.
+                    {t('import.loadedHint')}
                   </span>
                 </div>
                 {onStartOver && (
@@ -153,7 +169,7 @@ export default function ImportPage({
                     onClick={onStartOver}
                     className="shrink-0 text-slate-400 hover:text-red-400 transition-colors text-sm"
                   >
-                    Start over
+                    {t('import.startOver')}
                   </button>
                 )}
               </div>
@@ -161,10 +177,9 @@ export default function ImportPage({
           )}
           <div className="mb-6 bg-slate-800 border border-slate-700 rounded-xl p-5">
             <label className="block">
-              <span className="text-slate-200 font-medium">Polish tax residency start date</span>
+              <span className="text-slate-200 font-medium">{t('import.residencyLabel')}</span>
               <span className="block text-slate-500 text-sm mt-1">
-                Optional. Leave empty for a full-year calculation. If set, Pitly will report only dividends and sells
-                on or after this date, while still using earlier uploaded history to reconstruct FIFO lots.
+                {t('import.residencyHint')}
               </span>
               <input
                 type="date"
@@ -186,8 +201,8 @@ export default function ImportPage({
             }`}
           >
             <Upload className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-            <p className="text-slate-300 font-medium mb-1">Drag & drop your CSV files here</p>
-            <p className="text-slate-500 text-sm">or click to browse. Upload prior years too if you sold older holdings.</p>
+            <p className="text-slate-300 font-medium mb-1">{t('import.dropTitle')}</p>
+            <p className="text-slate-500 text-sm">{t('import.dropHint')}</p>
             <input type="file" accept=".csv" multiple className="hidden" onChange={handleFileInput} />
           </label>
 
@@ -199,31 +214,31 @@ export default function ImportPage({
               </div>
               {pendingFiles.length > 0 && (
                 <div className="ml-7 text-slate-400">
-                  <span className="text-slate-300">Already queued:</span>{' '}
+                  <span className="text-slate-300">{t('import.queuedLabel')}</span>{' '}
                   {pendingFiles.map(f => f.name).join(', ')}
-                  <span className="block mt-1">Upload any additional prior-year files and they will be combined automatically.</span>
+                  <span className="block mt-1">{t('import.queuedHint')}</span>
                 </div>
               )}
             </div>
           )}
 
           <div className="mt-8 space-y-2">
-            <HelpSection title="How to export from Interactive Brokers">
-              <p>1. Log in to IB Client Portal</p>
-              <p>2. Go to <strong className="text-slate-300">Reports &rarr; Statements &rarr; Activity</strong></p>
-              <p>3. Select the full tax year, format: <strong className="text-slate-300">CSV</strong></p>
-              <p>4. Even with a mid-year residency start date, still export the full calendar year so FIFO stays correct.</p>
-              <p>5. If you sold shares bought in earlier years, upload those earlier yearly CSVs together.</p>
-              <p>6. Stock splits, ISIN changes, mergers and spin-offs from the Corporate Actions section are applied automatically; keep the earlier years that hold the original buys in the same upload.</p>
+            <HelpSection title={t('import.ibTitle')}>
+              <p>{t('import.ibStep1')}</p>
+              <p>{t('import.ibStep2Prefix')}<strong className="text-slate-300">Reports &rarr; Statements &rarr; Activity</strong></p>
+              <p>{t('import.ibStep3Prefix')}<strong className="text-slate-300">CSV</strong></p>
+              <p>{t('import.ibStep4')}</p>
+              <p>{t('import.ibStep5')}</p>
+              <p>{t('import.ibStep6')}</p>
             </HelpSection>
-            <HelpSection title="How to export from Trading 212">
-              <p>1. Log in to Trading 212</p>
-              <p>2. Go to <strong className="text-slate-300">History</strong> (clock icon)</p>
-              <p>3. Click the <strong className="text-slate-300">Download</strong> icon</p>
-              <p>4. Select the full tax year and export as CSV</p>
-              <p>5. Even with a mid-year residency start date, still export the full calendar year so FIFO stays correct.</p>
-              <p>6. Upload one or more yearly CSVs together if you need prior-year FIFO history</p>
-              <p>7. Stock splits are read from the paired &quot;Stock split close&quot; / &quot;Stock split open&quot; rows, so export the full period that contains both.</p>
+            <HelpSection title={t('import.t212Title')}>
+              <p>{t('import.t212Step1')}</p>
+              <p>{t('import.t212Step2Prefix')}<strong className="text-slate-300">History</strong>{t('import.t212Step2Suffix')}</p>
+              <p>{t('import.t212Step3Prefix')}<strong className="text-slate-300">Download</strong>{t('import.t212Step3Suffix')}</p>
+              <p>{t('import.t212Step4')}</p>
+              <p>{t('import.t212Step5')}</p>
+              <p>{t('import.t212Step6')}</p>
+              <p>{t('import.t212Step7')}</p>
             </HelpSection>
           </div>
         </>
@@ -232,7 +247,7 @@ export default function ImportPage({
           <div className="space-y-4">
             {(() => {
               const currentIdx = steps.findIndex(s => s.key === step);
-              return steps.map(({ key, label }, idx) => {
+              return steps.map(({ key, labelKey }, idx) => {
               const isDone = idx < currentIdx || step === 'done';
               const isCurrent = idx === currentIdx && step !== 'done';
 
@@ -246,7 +261,7 @@ export default function ImportPage({
                     <div className="w-5 h-5 rounded-full border-2 border-slate-600" />
                   )}
                   <span className={isDone ? 'text-green-400' : isCurrent ? 'text-white' : 'text-slate-500'}>
-                    {label}
+                    {t(labelKey)}
                   </span>
                 </div>
               );

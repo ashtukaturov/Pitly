@@ -8,6 +8,7 @@ import TransactionsPage from './pages/TransactionsPage';
 import DividendsPage from './pages/DividendsPage';
 import Pit38Page from './pages/Pit38Page';
 import { importFiles } from './api';
+import { useT } from './i18n';
 import type { AppState } from './types';
 
 function AppLayout({ year }: { year: number | null }) {
@@ -23,6 +24,7 @@ function AppLayout({ year }: { year: number | null }) {
 
 export default function App() {
   const navigate = useNavigate();
+  const t = useT();
   const [state, setState] = useState<AppState>({
     sessionId: null,
     summary: null,
@@ -76,7 +78,7 @@ export default function App() {
         residencyStartDate,
       }));
     } catch (err: unknown) {
-      setYearError(err instanceof Error ? err.message : 'Could not switch the tax year');
+      setYearError(err instanceof Error ? err.message : t('app.switchYearFailed'));
     } finally {
       setSwitchingYear(false);
     }

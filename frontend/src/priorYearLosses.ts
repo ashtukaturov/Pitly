@@ -1,4 +1,5 @@
 import type { PriorYearLossInput } from './types';
+import type { TFunction } from './i18n/index';
 
 export interface PriorYearLossRow {
   year: string;
@@ -16,8 +17,8 @@ export function parseAmount(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Client-side validation mirroring PriorYearLossJson.TryParseInput on the backend. */
-export function validatePriorYearLossRows(rows: PriorYearLossRow[]): { losses: PriorYearLossInput[]; error?: string } {
+/** Client-side validation mirroring PriorYearLossJson.TryParseInput on the backend. Error messages come from `t`. */
+export function validatePriorYearLossRows(rows: PriorYearLossRow[], t: TFunction): { losses: PriorYearLossInput[]; error?: string } {
   const losses: PriorYearLossInput[] = [];
   const seen = new Set<number>();
   for (const row of rows) {
@@ -26,28 +27,28 @@ export function validatePriorYearLossRows(rows: PriorYearLossRow[]): { losses: P
 
     const year = Number(row.year);
     if (!Number.isInteger(year) || year < 1990 || year > 2100) {
-      return { losses: [], error: 'Prior-year loss: enter a valid loss year (e.g. 2023).' };
+      return { losses: [], error: t('losses.errorInvalidYear') };
     }
     if (seen.has(year)) {
-      return { losses: [], error: `Prior-year loss: year ${year} is entered twice.` };
+      return { losses: [], error: t('losses.errorDuplicateYear', { year }) };
     }
     seen.add(year);
 
     const loss = parseAmount(row.loss);
     if (loss === null || loss <= 0) {
-      return { losses: [], error: `Prior-year loss for ${year}: enter the loss as a positive amount in PLN.` };
+      return { losses: [], error: t('losses.errorNonPositive', { year }) };
     }
     const deducted = row.deducted.trim() === '' ? 0 : parseAmount(row.deducted);
     if (deducted === null || deducted < 0) {
-      return { losses: [], error: `Prior-year loss for ${year}: the already-deducted amount must be zero or positive.` };
+      return { losses: [], error: t('losses.errorDeductedNegative', { year }) };
     }
     if (deducted > loss) {
-      return { losses: [], error: `Prior-year loss for ${year}: the already-deducted amount cannot exceed the loss.` };
+      return { losses: [], error: t('losses.errorDeductedExceeds', { year }) };
     }
     losses.push({ year, lossPln: Math.round(loss * 100) / 100, deductedPln: Math.round(deducted * 100) / 100 });
   }
   if (losses.length > MAX_PRIOR_YEAR_LOSS_ROWS) {
-    return { losses: [], error: `At most ${MAX_PRIOR_YEAR_LOSS_ROWS} prior-year loss entries are supported.` };
+    return { losses: [], error: t('losses.errorTooMany', { max: MAX_PRIOR_YEAR_LOSS_ROWS }) };
   }
   return { losses };
 }

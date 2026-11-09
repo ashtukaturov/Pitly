@@ -3,10 +3,18 @@ import { ArrowUpDown, Search } from 'lucide-react';
 import { formatPln, formatUsd, formatRate, formatDate, formatTaxPeriod, hasCustomTaxPeriod, numColor } from '../format';
 import type { AppState, TradeResult } from '../types';
 import EmptyState from '../components/EmptyState';
+import { useT } from '../i18n';
 
 type SortKey = 'dateTime' | 'symbol' | 'gainLossPln';
 
+const TYPE_FILTER_KEYS = {
+  all: 'transactions.filterAll',
+  Buy: 'transactions.typeBuy',
+  Sell: 'transactions.typeSell',
+} as const;
+
 export default function TransactionsPage({ state }: { state: AppState }) {
+  const t = useT();
   const [symbolFilter, setSymbolFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'Buy' | 'Sell'>('all');
   const [sortKey, setSortKey] = useState<SortKey>('dateTime');
@@ -16,8 +24,8 @@ export default function TransactionsPage({ state }: { state: AppState }) {
 
   const filtered = useMemo(() => {
     let data = [...state.trades];
-    if (symbolFilter) data = data.filter(t => t.symbol.toLowerCase().includes(symbolFilter.toLowerCase()));
-    if (typeFilter !== 'all') data = data.filter(t => t.type === typeFilter);
+    if (symbolFilter) data = data.filter(trade => trade.symbol.toLowerCase().includes(symbolFilter.toLowerCase()));
+    if (typeFilter !== 'all') data = data.filter(trade => trade.type === typeFilter);
 
     data.sort((a, b) => {
       let cmp = 0;
@@ -31,11 +39,11 @@ export default function TransactionsPage({ state }: { state: AppState }) {
 
   const totals = useMemo(() => {
     let proceeds = 0, cost = 0, gainLoss = 0;
-    for (const t of filtered) {
-      if (t.type !== 'Sell') continue;
-      proceeds += t.proceedsPln;
-      cost += t.costPln;
-      gainLoss += t.gainLossPln;
+    for (const trade of filtered) {
+      if (trade.type !== 'Sell') continue;
+      proceeds += trade.proceedsPln;
+      cost += trade.costPln;
+      gainLoss += trade.gainLossPln;
     }
     return { proceeds, cost, gainLoss };
   }, [filtered]);
@@ -68,16 +76,16 @@ export default function TransactionsPage({ state }: { state: AppState }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-white text-2xl font-bold">Transactions</h1>
+        <h1 className="text-white text-2xl font-bold">{t('transactions.title')}</h1>
         <p className="text-slate-400 text-sm mt-1">
-          Showing reportable trades for {formatTaxPeriod(state.summary.taxableFrom, state.summary.taxableTo)}.
+          {t('transactions.showing', { period: formatTaxPeriod(state.summary.taxableFrom, state.summary.taxableTo) })}
         </p>
         <p className="text-slate-500 text-sm mt-1">
-          Sell-side <span className="font-medium text-slate-400">Cost (PLN)</span> is reconstructed from matched FIFO buy lots using their original NBP rates. The rate shown in each row is the row trade&apos;s own NBP rate.
+          {t('transactions.costNoteBefore')}<span className="font-medium text-slate-400">{t('transactions.costNoteLabel')}</span>{t('transactions.costNoteAfter')}
         </p>
         {customTaxPeriod && (
           <p className="text-slate-500 text-sm mt-1">
-            Earlier uploaded history may still affect FIFO cost basis even when those rows are not shown here.
+            {t('transactions.customPeriodNote')}
           </p>
         )}
       </div>
@@ -87,26 +95,30 @@ export default function TransactionsPage({ state }: { state: AppState }) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Filter by symbol..."
+            placeholder={t('transactions.filterPlaceholder')}
             value={symbolFilter}
             onChange={(e) => { setSymbolFilter(e.target.value); setPage(1); }}
             className="bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
         <div className="flex rounded-lg overflow-hidden border border-slate-700">
-          {(['all', 'Buy', 'Sell'] as const).map(t => (
+          {(['all', 'Buy', 'Sell'] as const).map(kind => (
             <button
-              key={t}
-              onClick={() => { setTypeFilter(t); setPage(1); }}
+              key={kind}
+              onClick={() => { setTypeFilter(kind); setPage(1); }}
               className={`px-4 py-2 text-sm transition-colors ${
-                typeFilter === t ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+                typeFilter === kind ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              {t === 'all' ? 'All' : t}
+              {t(TYPE_FILTER_KEYS[kind])}
             </button>
           ))}
         </div>
-        <span className="text-slate-500 text-sm ml-auto">{filtered.length} transactions</span>
+        <span className="text-slate-500 text-sm ml-auto">
+          {filtered.length === 1
+            ? t('transactions.countOne', { count: filtered.length })
+            : t('transactions.countMany', { count: filtered.length })}
+        </span>
       </div>
 
       <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
@@ -114,26 +126,26 @@ export default function TransactionsPage({ state }: { state: AppState }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700">
-                {sortHeader("Date", "dateTime")}
-                {sortHeader("Symbol", "symbol")}
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">Type</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Qty</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Price (USD)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Proceeds (USD)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Trade Rate</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Proceeds (PLN)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Cost (PLN)</th>
-                {sortHeader("Gain/Loss (PLN)", "gainLossPln")}
+                {sortHeader(t('transactions.col.date'), 'dateTime')}
+                {sortHeader(t('transactions.col.symbol'), 'symbol')}
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">{t('transactions.col.type')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('transactions.col.qty')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('transactions.col.priceUsd')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('transactions.col.proceedsUsd')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('transactions.col.tradeRate')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('transactions.col.proceedsPln')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('transactions.col.costPln')}</th>
+                {sortHeader(t('transactions.col.gainLossPln'), 'gainLossPln')}
               </tr>
             </thead>
             <tbody>
-              {paginated.map((t, i) => (
-                <Row key={`${t.symbol}-${t.dateTime}-${i}`} trade={t} />
+              {paginated.map((trade, i) => (
+                <Row key={`${trade.symbol}-${trade.dateTime}-${i}`} trade={trade} />
               ))}
             </tbody>
             <tfoot>
               <tr className="border-t border-slate-600 bg-slate-800/80">
-                <td colSpan={7} className="px-3 py-3 text-slate-300 font-medium text-sm">Totals (reportable sells)</td>
+                <td colSpan={7} className="px-3 py-3 text-slate-300 font-medium text-sm">{t('transactions.totals')}</td>
                 <td className="px-3 py-3 text-right font-mono tabular-nums text-blue-400 text-sm">{formatPln(totals.proceeds)}</td>
                 <td className="px-3 py-3 text-right font-mono tabular-nums text-blue-400 text-sm">{formatPln(totals.cost)}</td>
                 <td className={`px-3 py-3 text-right font-mono tabular-nums text-sm ${numColor(totals.gainLoss)}`}>{formatPln(totals.gainLoss)}</td>
@@ -150,15 +162,15 @@ export default function TransactionsPage({ state }: { state: AppState }) {
             onClick={() => setPage(p => p - 1)}
             className="px-3 py-1.5 text-sm rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-white disabled:opacity-40"
           >
-            Previous
+            {t('transactions.previous')}
           </button>
-          <span className="text-slate-400 text-sm px-3">Page {page} of {totalPages}</span>
+          <span className="text-slate-400 text-sm px-3">{t('transactions.pageOf', { page, total: totalPages })}</span>
           <button
             disabled={page >= totalPages}
             onClick={() => setPage(p => p + 1)}
             className="px-3 py-1.5 text-sm rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-white disabled:opacity-40"
           >
-            Next
+            {t('transactions.next')}
           </button>
         </div>
       )}
@@ -166,35 +178,36 @@ export default function TransactionsPage({ state }: { state: AppState }) {
   );
 }
 
-function Row({ trade: t }: { trade: TradeResult }) {
-  const isSell = t.type === 'Sell';
+function Row({ trade }: { trade: TradeResult }) {
+  const t = useT();
+  const isSell = trade.type === 'Sell';
   return (
-    <tr className={`border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors ${t.rateUnavailable ? 'bg-amber-500/5' : ''}`}>
-      <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap" title={t.rateUnavailable ? 'Rate unavailable — manual entry required' : undefined}>
-        {formatDate(t.dateTime)}
+    <tr className={`border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors ${trade.rateUnavailable ? 'bg-amber-500/5' : ''}`}>
+      <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap" title={trade.rateUnavailable ? t('transactions.rateUnavailable') : undefined}>
+        {formatDate(trade.dateTime)}
       </td>
       <td className="px-3 py-2.5 text-white font-medium">
-        {t.symbol}
-        {t.note && (
-          <span className="block text-xs font-normal text-amber-300/90 mt-0.5 max-w-xs" title={t.note}>{t.note}</span>
+        {trade.symbol}
+        {trade.note && (
+          <span className="block text-xs font-normal text-amber-300/90 mt-0.5 max-w-xs" title={trade.note}>{trade.note}</span>
         )}
       </td>
       <td className="px-3 py-2.5">
-        <span className={t.type === 'Buy'
+        <span className={trade.type === 'Buy'
           ? 'bg-blue-500/20 text-blue-300 text-xs px-2 py-0.5 rounded-full'
           : 'bg-amber-500/20 text-amber-300 text-xs px-2 py-0.5 rounded-full'
         }>
-          {t.type}
+          {trade.type === 'Buy' ? t('transactions.typeBuy') : trade.type === 'Sell' ? t('transactions.typeSell') : trade.type}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{t.quantity}</td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{formatUsd(t.priceOriginal)}</td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{isSell ? formatUsd(t.proceedsOriginal) : '\u2014'}</td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-400">{formatRate(t.exchangeRate)}</td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{isSell ? formatPln(t.proceedsPln) : '\u2014'}</td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{formatPln(t.costPln)}</td>
-      <td className={`px-3 py-2.5 text-right font-mono tabular-nums ${isSell ? numColor(t.gainLossPln) : 'text-slate-600'}`}>
-        {isSell ? formatPln(t.gainLossPln) : '\u2014'}
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{trade.quantity}</td>
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{formatUsd(trade.priceOriginal)}</td>
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{isSell ? formatUsd(trade.proceedsOriginal) : '—'}</td>
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-400">{formatRate(trade.exchangeRate)}</td>
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{isSell ? formatPln(trade.proceedsPln) : '—'}</td>
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{formatPln(trade.costPln)}</td>
+      <td className={`px-3 py-2.5 text-right font-mono tabular-nums ${isSell ? numColor(trade.gainLossPln) : 'text-slate-600'}`}>
+        {isSell ? formatPln(trade.gainLossPln) : '—'}
       </td>
     </tr>
   );

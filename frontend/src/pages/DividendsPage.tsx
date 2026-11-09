@@ -3,13 +3,14 @@ import { Info, Search } from 'lucide-react';
 import { formatPln, formatUsd, formatRate, formatDate, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState } from '../types';
 import EmptyState from '../components/EmptyState';
+import { useT } from '../i18n';
 
 const PL_TAX_RATE = 0.19;
 
-const KIND_LABELS: Record<string, string> = {
-  Dividend: 'Dividend',
-  PaymentInLieu: 'Payment in lieu',
-  Interest: 'Interest',
+const KIND_KEYS: Record<string, string> = {
+  Dividend: 'dividends.kind.dividend',
+  PaymentInLieu: 'dividends.kind.paymentInLieu',
+  Interest: 'dividends.kind.interest',
 };
 
 const KIND_STYLES: Record<string, string> = {
@@ -19,6 +20,7 @@ const KIND_STYLES: Record<string, string> = {
 };
 
 export default function DividendsPage({ state }: { state: AppState }) {
+  const t = useT();
   const [symbolFilter, setSymbolFilter] = useState('');
 
   const filtered = useMemo(() => {
@@ -48,13 +50,13 @@ export default function DividendsPage({ state }: { state: AppState }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-white text-2xl font-bold">Dividends</h1>
+        <h1 className="text-white text-2xl font-bold">{t('dividends.title')}</h1>
         <p className="text-slate-400 text-sm mt-1">
-          Showing dividends received in {formatTaxPeriod(state.summary.taxableFrom, state.summary.taxableTo)}.
+          {t('dividends.showing', { period: formatTaxPeriod(state.summary.taxableFrom, state.summary.taxableTo) })}
         </p>
         {hasCustomTaxPeriod(state.summary.year, state.summary.taxableFrom) && (
           <p className="text-slate-500 text-sm mt-1">
-            Only dividends paid on or after the residency start date are included.
+            {t('dividends.residencyNote')}
           </p>
         )}
       </div>
@@ -64,28 +66,31 @@ export default function DividendsPage({ state }: { state: AppState }) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Filter by symbol..."
+            placeholder={t('dividends.filterPlaceholder')}
             value={symbolFilter}
             onChange={(e) => setSymbolFilter(e.target.value)}
             className="bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
-        <span className="text-slate-500 text-sm ml-auto">{filtered.length} dividends</span>
+        <span className="text-slate-500 text-sm ml-auto">
+          {filtered.length === 1
+            ? t('dividends.countOne', { count: filtered.length })
+            : t('dividends.countMany', { count: filtered.length })}
+        </span>
       </div>
 
       <div className="flex items-start gap-3 bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
         <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
         <div className="text-sm text-blue-300">
-          <p>Polish tax on dividends is 19%. Foreign withholding tax can be credited against it, but only up to the rate set by the tax treaty with the issuer&apos;s country (15% for US, 10% for UK, 15% for Germany, ...).</p>
-          <p className="mt-1">For a US dividend withheld at exactly 15%, the net tax owed in Poland is 19% - 15% = <strong>4%</strong>. Anything withheld above the treaty rate is not creditable and must be reclaimed abroad.</p>
-          <p className="mt-1">Interest on cash balances and &quot;payments in lieu of dividends&quot; (received while your shares were lent out) are also taxed at 19% under art. 30a and go into the same PIT-38 field (poz. 47). The exact treatment of payments in lieu is not settled in Polish practice: Pitly treats them like dividends, so confirm with a tax advisor if the amounts are material.</p>
+          <p>{t('dividends.info1')}</p>
+          <p className="mt-1">{t('dividends.info2Before')}<strong>{t('dividends.info2Rate')}</strong>{t('dividends.info2After')}</p>
+          <p className="mt-1">{t('dividends.info3')}</p>
         </div>
       </div>
 
       {hasCappedWithholding && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-sm text-amber-200">
-          Some dividends were withheld above the treaty rate (e.g. 30% US withholding without a W-8BEN). Only the
-          treaty-rate part is credited in the &quot;Creditable&quot; column; the rest cannot be offset on PIT-38.
+          {t('dividends.cappedWarning')}
         </div>
       )}
 
@@ -94,16 +99,16 @@ export default function DividendsPage({ state }: { state: AppState }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700">
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">Date</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">Symbol</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">Type</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Amount (USD)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Rate</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Amount (PLN)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Withheld (PLN)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Creditable (PLN)</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">PL Tax 19%</th>
-                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">Net Tax Owed</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">{t('dividends.col.date')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">{t('dividends.col.symbol')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-left">{t('dividends.col.type')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.amountUsd')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.rate')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.amountPln')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.withheldPln')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.creditablePln')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.plTax')}</th>
+                <th className="text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3 text-right">{t('dividends.col.netTaxOwed')}</th>
               </tr>
             </thead>
             <tbody>
@@ -111,6 +116,7 @@ export default function DividendsPage({ state }: { state: AppState }) {
                 const plTax = d.amountPln * PL_TAX_RATE;
                 const netOwed = Math.max(plTax - d.creditableWithholdingPln, 0);
                 const capped = d.withholdingTaxPln > d.creditableWithholdingPln + 0.005;
+                const kindKey = KIND_KEYS[d.kind];
                 return (
                   <tr
                     key={i}
@@ -120,7 +126,7 @@ export default function DividendsPage({ state }: { state: AppState }) {
                     <td className="px-3 py-2.5 text-white font-medium">{d.symbol}</td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ${KIND_STYLES[d.kind] ?? KIND_STYLES.Dividend}`}>
-                        {KIND_LABELS[d.kind] ?? d.kind}
+                        {kindKey ? t(kindKey) : d.kind}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{formatUsd(d.amountOriginal)}</td>
@@ -129,7 +135,9 @@ export default function DividendsPage({ state }: { state: AppState }) {
                     <td className="px-3 py-2.5 text-right font-mono tabular-nums text-red-400">{formatPln(d.withholdingTaxPln)}</td>
                     <td
                       className={`px-3 py-2.5 text-right font-mono tabular-nums ${capped ? 'text-amber-400' : 'text-red-400'}`}
-                      title={d.maxCreditableRate != null ? `Treaty cap ${Math.round(d.maxCreditableRate * 100)}%` : 'Statutory cap 19% (no treaty rate on file)'}
+                      title={d.maxCreditableRate != null
+                        ? t('dividends.treatyCap', { rate: Math.round(d.maxCreditableRate * 100) })
+                        : t('dividends.statutoryCap')}
                     >
                       {formatPln(d.creditableWithholdingPln)}
                     </td>
@@ -141,7 +149,7 @@ export default function DividendsPage({ state }: { state: AppState }) {
             </tbody>
             <tfoot>
               <tr className="border-t border-slate-600 bg-slate-800/80">
-                <td colSpan={5} className="px-3 py-3 text-slate-300 font-medium text-sm">Totals</td>
+                <td colSpan={5} className="px-3 py-3 text-slate-300 font-medium text-sm">{t('dividends.totals')}</td>
                 <td className="px-3 py-3 text-right font-mono tabular-nums text-blue-400 text-sm">{formatPln(totals.amountPln)}</td>
                 <td className="px-3 py-3 text-right font-mono tabular-nums text-red-400 text-sm">{formatPln(totals.withholdingPln)}</td>
                 <td className="px-3 py-3 text-right font-mono tabular-nums text-red-400 text-sm">{formatPln(totals.creditablePln)}</td>
