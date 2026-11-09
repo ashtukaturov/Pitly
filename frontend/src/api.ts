@@ -1,20 +1,21 @@
-import type { ImportResponse, TradesPage, DividendResult, TaxSummary } from './types';
+import type { ImportResponse, TradesPage, DividendResult, TaxSummary, Pit38Fields, PriorYearLossInput } from './types';
 
 const BASE = '/api';
 
-function buildImportForm(files: File[], residencyStartDate?: string): FormData {
+function buildImportForm(files: File[], residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[]): FormData {
   const form = new FormData();
   files.forEach(file => form.append('files', file));
   if (residencyStartDate) form.append('residencyStartDate', residencyStartDate);
+  if (priorYearLosses && priorYearLosses.length > 0) form.append('priorYearLosses', JSON.stringify(priorYearLosses));
   return form;
 }
 
-export async function importFile(file: File, residencyStartDate?: string): Promise<ImportResponse> {
-  return importFiles([file], residencyStartDate);
+export async function importFile(file: File, residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[]): Promise<ImportResponse> {
+  return importFiles([file], residencyStartDate, priorYearLosses);
 }
 
-export async function importFiles(files: File[], residencyStartDate?: string): Promise<ImportResponse> {
-  const form = buildImportForm(files, residencyStartDate);
+export async function importFiles(files: File[], residencyStartDate?: string, priorYearLosses?: PriorYearLossInput[]): Promise<ImportResponse> {
+  const form = buildImportForm(files, residencyStartDate, priorYearLosses);
   const res = await fetch(`${BASE}/import`, { method: 'POST', body: form });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Import failed' }));
@@ -49,6 +50,13 @@ export async function getDividends(sessionId: string): Promise<DividendResult[]>
 export async function getSummary(sessionId: string): Promise<TaxSummary> {
   const res = await fetch(`${BASE}/session/${sessionId}/summary`);
   if (!res.ok) throw new Error('Failed to load summary');
+  return res.json();
+}
+
+/** PIT-38 field values computed on the backend (decimal arithmetic, single source of truth). */
+export async function getPit38(sessionId: string): Promise<Pit38Fields> {
+  const res = await fetch(`${BASE}/session/${sessionId}/pit38`);
+  if (!res.ok) throw new Error('Failed to load PIT-38 fields');
   return res.json();
 }
 

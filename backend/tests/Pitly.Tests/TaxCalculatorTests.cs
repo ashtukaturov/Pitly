@@ -60,6 +60,7 @@ public class TaxCalculatorTests
         Assert.Equal(2025, summary.Year);
         Assert.Equal(new DateTime(2025, 1, 1), summary.TaxableFrom);
         Assert.Equal(new DateTime(2025, 12, 31), summary.TaxableTo);
+        Assert.Equal(0.3m, summary.TotalCreditableWithholdingPln);
         Assert.Equal(100m, summary.TotalProceedsPln);
         Assert.Equal(50m, summary.TotalCostPln);
         Assert.Equal(50m, summary.CapitalGainPln);
@@ -168,5 +169,96 @@ public class TaxCalculatorTests
 
         var dividend = Assert.Single(summary.Dividends);
         Assert.Equal(new DateTime(2025, 8, 5), dividend.Date);
+    }
+
+    [Fact]
+    public async Task CalculateAsync_OffsetsOnlyTreatyCappedWithholdingAgainstDividendTax()
+    {
+        var rateService = new TestRateService(new Dictionary<string, decimal>
+        {
+            ["USD"] = 1m
+        });
+        var calculator = new TaxCalculator(
+            new CapitalGainsTaxCalculator(rateService),
+            new DividendTaxCalculator(rateService));
+
+        var statement = new ParsedStatement(
+            Trades: [],
+            Dividends:
+            [
+                new("AAPL", "USD", new DateTime(2025, 5, 15), 100m, "US0378331005")
+            ],
+            WithholdingTaxes:
+            [
+                // 30% withheld without a W-8BEN: only 15% is creditable
+                new("AAPL", "USD", new DateTime(2025, 5, 15), 30m, "US0378331005")
+            ]);
+
+        var summary = await calculator.CalculateAsync(statement, TaxPeriod.FullYear(2025));
+
+        Assert.Equal(100m, summary.TotalDividendsPln);
+        Assert.Equal(30m, summary.TotalWithholdingPln);
+        Assert.Equal(15m, summary.TotalCreditableWithholdingPln);
+        // 19 PLN Polish tax - 15 PLN creditable = 4 PLN owed (not 0 as a naive 19% cap would give)
+        Assert.Equal(4m, summary.DividendTaxOwedPln);
+
+        var pit38 = Pit38Fields.FromSummary(summary);
+        Assert.Equal(19m, pit38.Poz47ZryczaltowanyPodatek);
+        Assert.Equal(15m, pit38.Poz48PodatekZaplaconyZaGranica);
+        Assert.Equal(4m, pit38.Poz49Roznica);
+    }
+
+    [Fact]
+    public void Pit38Fields_DeductsPriorYearLossCappedAtIncome()
+    {
+        var summary = BuildSummary(proceeds: 1000m, cost: 400m, priorYearLoss: 200m);
+
+        var pit38 = Pit38Fields.FromSummary(summary);
+
+        Assert.Equal(600m, pit38.Poz26Dochod);
+        Assert.Equal(200m, pit38.Poz30StratyZLatUbieglych);
+        Assert.Equal(400m, pit38.Poz31PodstawaObliczenia);
+        Assert.Equal(76m, pit38.Poz33Podatek);
+        Assert.Equal(76m, pit38.Poz35PodatekNalezny);
+        Assert.Equal(0m, pit38.DaninaSolidarnosciowaPln);
+
+        // A loss larger than this year's income is capped: the base cannot go negative.
+        var capped = Pit38Fields.FromSummary(BuildSummary(proceeds: 1000m, cost: 400m, priorYearLoss: 5000m));
+        Assert.Equal(600m, capped.Poz30StratyZLatUbieglych);
+        Assert.Equal(0m, capped.Poz31PodstawaObliczenia);
+        Assert.Equal(0m, capped.Poz51PodatekDoZaplaty);
+    }
+
+    [Fact]
+    public void Pit38Fields_ComputesSolidarityLevyAboveOneMillion()
+    {
+        var summary = BuildSummary(proceeds: 2_600_000m, cost: 1_000_000m, priorYearLoss: 100_000m);
+
+        var pit38 = Pit38Fields.FromSummary(summary);
+
+        // 1 600 000 income - 100 000 loss = 1 500 000 base; excess over 1 000 000 = 500 000; 4% = 20 000
+        Assert.Equal(1_500_000m, pit38.Poz31PodstawaObliczenia);
+        Assert.Equal(500_000m, pit38.DaninaSolidarnosciowaNadwyzka);
+        Assert.Equal(20_000m, pit38.DaninaSolidarnosciowaPln);
+    }
+
+    private static TaxSummary BuildSummary(decimal proceeds, decimal cost, decimal priorYearLoss)
+    {
+        var gain = proceeds - cost;
+        return new TaxSummary(
+            TotalProceedsPln: proceeds,
+            TotalCostPln: cost,
+            CapitalGainPln: gain,
+            CapitalGainTaxPln: gain > 0 ? Math.Round(gain * 0.19m, 2) : 0m,
+            TotalDividendsPln: 0m,
+            TotalWithholdingPln: 0m,
+            TotalCreditableWithholdingPln: 0m,
+            DividendTaxOwedPln: 0m,
+            Year: 2025,
+            TaxableFrom: new DateTime(2025, 1, 1),
+            TaxableTo: new DateTime(2025, 12, 31),
+            TradeResults: [],
+            Dividends: [],
+            PriorYearLosses: priorYearLoss > 0 ? [new PriorYearLoss(2023, priorYearLoss)] : []);
     }
 }

@@ -46,6 +46,29 @@ public class Trading212StatementParserTests
     }
 
     [Fact]
+    public void Parse_ParsesInterestOnCashAsInterestIncome()
+    {
+        var csv = """
+                  Action,Time,ISIN,Ticker,Name,Notes,ID,No. of shares,Price / share,Currency (Price / share),Exchange rate,Result,Currency (Result),Total,Currency (Total),Withholding tax,Currency (Withholding tax),Currency conversion fee,Currency (Currency conversion fee)
+                  Interest on cash,2025-03-01 00:10:00,,,,,6,,,,,,,1.23,PLN,,,,
+                  Lending interest,2025-03-15 00:10:00,,,,,7,,,,,,,0.40,PLN,,,,
+                  Interest on cash,2025-04-01 00:10:00,,,,,8,,,,,,,-0.50,PLN,,,,
+                  Dividend (Dividend),2025-12-23 12:18:17,US30303M1027,META,Meta Platforms,,4,0.2289742100,0.446250,USD,3.58310000,,,0.37,PLN,0.02,USD,,
+                  """;
+
+        var parsed = Parser.Parse(csv);
+
+        var interest = parsed.Dividends.Where(d => d.Kind == IncomeKind.Interest).ToList();
+        Assert.Equal(2, interest.Count);
+        Assert.All(interest, i => Assert.Equal("PLN", i.Currency));
+        Assert.Equal(1.23m, interest[0].Amount);
+        Assert.Equal(new DateTime(2025, 3, 1), interest[0].Date);
+        Assert.Equal(0.40m, interest[1].Amount);
+
+        Assert.Single(parsed.Dividends, d => d.Kind == IncomeKind.Dividend);
+    }
+
+    [Fact]
     public void Parse_UsesCurrencyCodeFromHeaderForFeeColumns()
     {
         var csv = """
@@ -61,16 +84,41 @@ public class Trading212StatementParserTests
     }
 
     [Fact]
-    public void Parse_RejectsUnsupportedSecurityActions()
+    public void Parse_PairsStockSplitOpenAndCloseRowsIntoOneSplit()
+    {
+        var csv = """
+                  Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share),Total,Currency (Total)
+                  Market buy,2024-06-03 10:00:00,US88160R1014,TSLA,Tesla,2.0000000000,180.0000000000,USD,360.00,USD
+                  Stock split close,2025-01-02 10:00:00,US88160R1014,TSLA,Tesla,2.0000000000,600,USD,,
+                  Stock split open,2025-01-02 10:00:00,US88160R1014,TSLA,Tesla,6.0000000000,200,USD,,
+                  """;
+
+        var parsed = Parser.Parse(csv);
+
+        var split = Assert.Single(parsed.CorporateActions!);
+        Assert.Equal(CorporateActionType.StockSplit, split.Type);
+        Assert.Equal("TSLA", split.Symbol);
+        Assert.Equal("US88160R1014", split.Isin);
+        Assert.Equal(6m, split.Numerator);
+        Assert.Equal(2m, split.Denominator);
+        Assert.Equal(3m, split.Factor);
+        Assert.Equal(new DateTime(2025, 1, 2, 10, 0, 0), split.DateTime);
+        Assert.Single(parsed.Trades);
+    }
+
+    [Fact]
+    public void Parse_RejectsStockSplitWithoutBothHalves()
     {
         var csv = """
                   Action,Time,ISIN,Ticker,Name,No. of shares,Price / share,Currency (Price / share)
+                  Market buy,2024-06-03 10:00:00,US0000000001,TEST,Test Corp,1.0000000000,100.0000000000,USD
                   Stock split,2025-01-02 10:00:00,US0000000001,TEST,Test Corp,2.0000000000,0,USD
                   """;
 
         var ex = Assert.Throws<FormatException>(() => Parser.Parse(csv));
 
-        Assert.Contains("Unsupported Trading 212 action", ex.Message);
+        Assert.Contains("Stock split close", ex.Message);
+        Assert.Contains("Stock split open", ex.Message);
     }
 
     [Fact]

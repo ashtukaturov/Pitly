@@ -28,4 +28,6 @@ public record TradeResult(
     decimal ProceedsPln,
     decimal CostPln,
     decimal GainLossPln,
-    bool RateUnavailable = false);
+    bool RateUnavailable = false,
+    // Explains synthetic rows created from corporate actions (cash merger, spin-off shares, cash in lieu)
+    string? Note = null);

@@ -105,7 +105,7 @@ npm install && npm run dev
 5. Select format: **CSV**
 6. Upload the downloaded file in the app
 7. If you became a Polish tax resident mid-year, still upload the full calendar-year CSV and set your residency start date in the app
-8. If you sold shares bought in earlier years, upload those earlier yearly CSVs together so Pitly can reconstruct FIFO lots and stock splits
+8. If you sold shares bought in earlier years, upload those earlier yearly CSVs together so Pitly can reconstruct FIFO lots and apply corporate actions (splits, ISIN changes, mergers, spin-offs)
 
 ### Trading 212
 
@@ -115,14 +115,21 @@ npm install && npm run dev
 4. Select date range (full tax year) and export as CSV
 5. If you became a Polish tax resident mid-year, still export the full calendar-year CSV and set your residency start date in the app
 6. Upload the downloaded file in the app
-7. Upload earlier yearly CSVs together when you need prior-year FIFO history
+7. Upload earlier yearly CSVs together when you need prior-year FIFO history; stock splits are read from the paired "Stock split close" / "Stock split open" rows
 
 A sample IB statement is provided at [`samples/sample-activity-statement.csv`](samples/sample-activity-statement.csv) for testing.
 
 ## How it works
 
+- **Przychód vs koszty** — the sale value is reported gross as przychód (poz. 22); buy and sell commissions are both treated as koszty uzyskania przychodu (poz. 23)
+- **Foreign tax credit** — withholding tax is credited only up to the rate set by the double-tax treaty with the issuer's country (derived from the ISIN prefix: 15% for US, 10% for UK, 15% for Germany, ...). Tax withheld above that rate (e.g. 30% US withholding without a W-8BEN) is shown but not credited, since it must be reclaimed abroad. Without an ISIN or treaty rate on file, the statutory 19% cap from art. 30a ust. 9 applies
+- **Interest and payments in lieu** — credit interest on cash (IB `Interest` section, Trading 212 `Interest on cash` / `Lending interest`) and IB `Payment In Lieu Of Dividends` are parsed as separate income kinds, taxed at 19% under art. 30a and added to the same PIT-38 field as dividends (poz. 47). Debit (margin) interest is ignored. The treatment of payments in lieu is not settled in Polish practice; confirm with an advisor if material
+- **Prior-year losses** — enter each earlier PIT-38 loss (year, amount, part already deducted); Pitly checks the 5-year carry-forward window (art. 9 ust. 3), the 50% per-year limit for pre-2019 losses and the 5 000 000 PLN one-off limit, deducts the oldest losses first, caps the total at this year's income (poz. 30) and warns about losses that expire unused
+- **Danina solidarnościowa** — if the capital-gains base (poz. 31) exceeds 1 000 000 PLN, the 4% solidarity levy (art. 30h, declared on DSF-1) is computed and shown. Only income known to Pitly is included; employment and business income also count toward the threshold
+- **PIT-38 values are computed on the backend** with decimal arithmetic and returned to the UI as-is; the frontend does not re-derive them
+
 - **NBP exchange rates** — for each transaction, the app currently fetches the official mid rate from the last business day before the **trade** date. Rates are cached in memory.
-- **Capital gains (FIFO)** — buy lots are queued per symbol. On sell, lots are dequeued first-in-first-out to compute cost basis in PLN. Net gains are taxed at 19%.
+- **Capital gains (FIFO)** — buy lots are queued per ISIN (falling back to the ticker when the statement has no ISIN). On sell, lots are dequeued first-in-first-out to compute cost basis in PLN. Net gains are taxed at 19%.
 - **Dividend tax** — Polish 19% tax minus foreign withholding credit (typically 15% under the PL-US treaty), resulting in ~4% net tax owed.
 
 ## API

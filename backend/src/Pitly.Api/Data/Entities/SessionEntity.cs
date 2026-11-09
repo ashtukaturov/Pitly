@@ -12,7 +12,14 @@ public class SessionEntity
     public decimal CapitalGainTaxPln { get; set; }
     public decimal TotalDividendsPln { get; set; }
     public decimal TotalWithholdingPln { get; set; }
+    public decimal TotalCreditableWithholdingPln { get; set; }
     public decimal DividendTaxOwedPln { get; set; }
+    // Amount actually deducted in poz. 30
+    public decimal PriorYearLossPln { get; set; }
+    // The user's per-year loss entries (JSON array of PriorYearLoss), so PIT-38 can be recomputed with warnings
+    public string? PriorYearLossesJson { get; set; }
+    // Parser warnings shown on the dashboard (JSON array of strings)
+    public string? WarningsJson { get; set; }
 
     public List<TradeResultEntity> TradeResults { get; set; } = [];
     public List<DividendEntity> Dividends { get; set; } = [];

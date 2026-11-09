@@ -1,58 +1,13 @@
-import { useMemo, useState } from 'react';
-import { Printer, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { Fragment, useState } from 'react';
+import { Printer, FileText, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { formatPln, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
-import type { AppState, Pit38Fields, TaxSummary } from '../types';
+import type { AppState, Pit38Fields } from '../types';
 import EmptyState from '../components/EmptyState';
 
-const TAX_RATE = 0.19;
-
-function roundToFullPln(value: number): number {
-  return Math.round(value);
-}
-
-// Art. 63 § 1a Ordynacji podatkowej — lump-sum tax under art. 30a ust. 1 pkt 1-3
-// is rounded to full groszy upward (footnote 8 on PIT-38(18) form).
-function roundToGroszUp(value: number): number {
-  return Math.ceil(value * 100) / 100;
-}
-
-function buildPit38(s: TaxSummary): Pit38Fields {
-  const przychody = s.totalProceedsPln;
-  const koszty = s.totalCostPln;
-  const difference = przychody - koszty;
-  const dochod = Math.max(difference, 0);
-  const strata = Math.max(-difference, 0);
-
-  const podstawa = roundToFullPln(dochod);
-  const podatek = Math.round(podstawa * TAX_RATE * 100) / 100;
-  const podatekNalezny = roundToFullPln(podatek);
-
-  const zryczaltowanyPodatek = roundToGroszUp(s.totalDividendsPln * TAX_RATE);
-  const podatekZaGranica = Math.round(Math.min(s.totalWithholdingPln, zryczaltowanyPodatek) * 100) / 100;
-  const roznica = roundToGroszUp(Math.max(zryczaltowanyPodatek - podatekZaGranica, 0));
-  const podatekDoZaplaty = podatekNalezny + roznica;
-
-  return {
-    year: s.year,
-    poz22Przychody: przychody,
-    poz23Koszty: koszty,
-    poz24RazemPrzychody: przychody,
-    poz25RazemKoszty: koszty,
-    poz26Dochod: Math.round(dochod * 100) / 100,
-    poz27Strata: Math.round(strata * 100) / 100,
-    Poz31PodstawaObliczenia: podstawa,
-    Poz33Podatek: podatek,
-    Poz35PodatekNalezny: podatekNalezny,
-    Poz47ZryczaltowanyPodatek: zryczaltowanyPodatek,
-    Poz48PodatekZaplaconyZaGranica: podatekZaGranica,
-    Poz49Roznica: roznica,
-    Poz51PodatekDoZaplaty: podatekDoZaplaty,
-    totalDividendsPln: s.totalDividendsPln,
-  };
-}
-
+// All PIT-38 values come from the backend (Pit38Fields.FromSummary, decimal arithmetic).
+// Nothing is re-derived here with floating point.
 export default function Pit38Page({ state }: { state: AppState }) {
-  const pit38 = useMemo(() => state.summary ? buildPit38(state.summary) : null, [state.summary]);
+  const pit38 = state.pit38;
 
   if (!state.sessionId || !state.summary || !pit38) {
     return <EmptyState />;
@@ -145,22 +100,24 @@ export default function Pit38Page({ state }: { state: AppState }) {
 
       <Section title="D. Obliczenie zobowiazania podatkowego — art. 30b ust. 1 ustawy">
         <FieldTable rows={[
-          { poz: '31', name: 'Podstawa obliczenia podatku', value: pit38.Poz31PodstawaObliczenia, note: 'Poz. 26 minus straty z lat ubieglych, zaokraglone do pelnych zl' },
-          { poz: '33', name: 'Podatek (poz. 31 \u00d7 19%)', value: pit38.Poz33Podatek },
-          { poz: '35', name: 'Podatek nalezny', value: pit38.Poz35PodatekNalezny, note: 'Po zaokragleniu do pelnych zl' },
+          { poz: '30', name: 'Straty z lat ubieglych', value: pit38.poz30StratyZLatUbieglych, note: 'Odliczenie niewykorzystanych strat z poprzednich 5 lat wedlug wpisow z importu, po sprawdzeniu 5-letniego okna i limitow (art. 9 ust. 3); nie moze przekroczyc dochodu z poz. 26' },
+          { poz: '31', name: 'Podstawa obliczenia podatku', value: pit38.poz31PodstawaObliczenia, note: 'Poz. 26 minus poz. 30, zaokraglone do pelnych zl' },
+          { poz: '33', name: 'Podatek (poz. 31 \u00d7 19%)', value: pit38.poz33Podatek },
+          { poz: '35', name: 'Podatek nalezny', value: pit38.poz35PodatekNalezny, note: 'Po zaokragleniu do pelnych zl' },
         ]} />
+        <PriorYearLossBreakdown pit38={pit38} />
       </Section>
 
       <Section title="G. Podatek do zaplaty — dywidendy zagraniczne (art. 30a)">
         <div className="px-6 py-3 border-b border-slate-700/50">
-          <span className="text-slate-500 text-xs">Gross dividends received: </span>
+          <span className="text-slate-500 text-xs">Gross foreign dividends, interest and payments in lieu: </span>
           <span className="font-mono text-slate-400 text-sm">{formatPln(pit38.totalDividendsPln)}</span>
           <span className="text-slate-600 text-xs ml-2">(informational — not entered on PIT-38)</span>
         </div>
         <FieldTable rows={[
-          { poz: '47', name: 'Zryczaltowany podatek 19% od dywidend zagranicznych', value: pit38.Poz47ZryczaltowanyPodatek },
-          { poz: '48', name: 'Podatek zaplacony za granica (US withholding)', value: pit38.Poz48PodatekZaplaconyZaGranica, note: 'Nie moze przekroczyc kwoty z poz. 47' },
-          { poz: '49', name: 'Roznica (poz. 47 \u2212 poz. 48)', value: pit38.Poz49Roznica, note: 'Zaokraglone do pelnych groszy w gore (art. 63 § 1a O.p.)' },
+          { poz: '47', name: 'Zryczaltowany podatek 19% od zagranicznych dywidend, odsetek i payments in lieu', value: pit38.poz47ZryczaltowanyPodatek },
+          { poz: '48', name: 'Podatek zaplacony za granica (foreign withholding)', value: pit38.poz48PodatekZaplaconyZaGranica, note: 'Tylko czesc zgodna ze stawka z umowy o unikaniu podwojnego opodatkowania (np. 15% dla USA); nie moze przekroczyc kwoty z poz. 47' },
+          { poz: '49', name: 'Roznica (poz. 47 \u2212 poz. 48)', value: pit38.poz49Roznica, note: 'Zaokraglone do pelnych groszy w gore (art. 63 § 1a O.p.)' },
         ]} />
       </Section>
 
@@ -168,10 +125,34 @@ export default function Pit38Page({ state }: { state: AppState }) {
         <FileText className="w-10 h-10 text-blue-400 mx-auto mb-3" />
         <p className="text-slate-500 text-xs font-mono mb-1">Poz. 51</p>
         <p className="text-blue-300 text-sm mb-1">PODATEK DO ZAPLATY</p>
-        <p className="text-white text-3xl font-bold font-mono tabular-nums">{formatPln(pit38.Poz51PodatekDoZaplaty)}</p>
+        <p className="text-white text-3xl font-bold font-mono tabular-nums">{formatPln(pit38.poz51PodatekDoZaplaty)}</p>
         <p className="text-slate-400 text-xs mt-1">= poz. 35 + poz. 49</p>
         <p className="text-slate-400 text-sm mt-2">Deadline: April 30, {year + 1}</p>
       </div>
+
+      {pit38.daninaSolidarnosciowaPln > 0 ? (
+        <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-5 text-sm text-red-200 flex gap-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-300" />
+          <div>
+            <p className="font-semibold text-red-100">
+              Danina solidarnosciowa (art. 30h): {formatPln(pit38.daninaSolidarnosciowaPln)}
+            </p>
+            <p className="mt-1">
+              Your capital-gains base (poz. 31) exceeds 1 000 000 zl by {formatPln(pit38.daninaSolidarnosciowaNadwyzka)}.
+              The 4% solidarity levy is declared separately on <strong className="text-red-100">DSF-1</strong> and paid
+              by April 30, {year + 1}. Employment, business and other qualifying incomes also count toward the
+              1 000 000 zl threshold, so the real amount may be higher than shown here. Dividends and interest
+              (art. 30a) are not included in the levy base.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p className="text-slate-500 text-xs px-1">
+          Danina solidarnosciowa (4% above 1 000 000 zl, DSF-1) is not triggered by this capital-gains income alone.
+          If your other incomes (employment, business) push the total above the threshold, the poz. 31 amount
+          ({formatPln(pit38.poz31PodstawaObliczenia)}) counts toward it.
+        </p>
+      )}
 
       <EpityGuide pit38={pit38} year={year} hasDividends={pit38.totalDividendsPln > 0} />
     </div>
@@ -327,10 +308,17 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
             <div className="space-y-4 mt-3">
               <div>
                 <p className="text-white font-medium text-xs uppercase tracking-wider mb-1">Straty z lat ubieglych</p>
-                <p>
-                  If you have unused losses from the past 5 years (max 50% per year), enter the amount.
-                  Otherwise leave empty.
-                </p>
+                {pit38.poz30StratyZLatUbieglych > 0 ? (
+                  <p>
+                    Enter <Val v={pit38.poz30StratyZLatUbieglych} /> (poz. 30), computed from the losses you entered at import after checking
+                    the 5-year window and per-year limits, capped at this year&apos;s income.
+                  </p>
+                ) : (
+                  <p>
+                    If you have undeducted PIT-38 losses from the past 5 years, enter them on the Import page so Pitly
+                    can check the limits and fill this field. Otherwise leave empty.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -344,7 +332,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
                 </p>
                 {hasDividends ? (
                   <p>
-                    Enter <Val v={pit38.Poz47ZryczaltowanyPodatek} /> (poz. 47)
+                    Enter <Val v={pit38.poz47ZryczaltowanyPodatek} /> (poz. 47)
                     <span className="block text-slate-500 text-xs">
                       This is 19% of your total gross dividends in PLN ({formatPln(pit38.totalDividendsPln)})
                     </span>
@@ -360,9 +348,10 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
                 </p>
                 {hasDividends ? (
                   <p>
-                    Enter <Val v={pit38.Poz48PodatekZaplaconyZaGranica} /> (poz. 48)
+                    Enter <Val v={pit38.poz48PodatekZaplaconyZaGranica} /> (poz. 48)
                     <span className="block text-slate-500 text-xs">
-                      US withholding tax already deducted by your broker, converted to PLN. Cannot exceed poz. 47.
+                      Foreign withholding tax deducted by your broker, converted to PLN and capped at the treaty rate
+                      for each issuer&apos;s country (e.g. 15% for US stocks). Cannot exceed poz. 47.
                     </span>
                   </p>
                 ) : (
@@ -395,7 +384,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
             <p>The summary screen shows your calculated tax:</p>
             <ul className="list-disc list-inside space-y-1 mt-2">
               <li>Kwota dochodu: {hasCapitalGains ? formatPln(pit38.poz26Dochod) : '0,00 zl'}</li>
-              <li>Kwota do zaplaty: <Val v={pit38.Poz51PodatekDoZaplaty} /></li>
+              <li>Kwota do zaplaty: <Val v={pit38.poz51PodatekDoZaplaty} /></li>
             </ul>
             <p className="mt-3">From here you can:</p>
             <ul className="list-disc list-inside space-y-2 mt-1">
@@ -411,7 +400,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
                 After submission, save the <strong className="text-white">UPO</strong> (Urzedowe
                 Poswiadczenie Odbioru) — your official receipt
               </li>
-              {pit38.Poz51PodatekDoZaplaty > 0 && (
+              {pit38.poz51PodatekDoZaplaty > 0 && (
                 <li>
                   Click <strong className="text-white">&quot;ZAPLAC PODATEK ONLINE&quot;</strong> or
                   &quot;DRUK PRZELEWU&quot; to pay
@@ -420,8 +409,8 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
             </ul>
             <p className="mt-2">
               Deadline: <strong className="text-white">April 30, {year + 1}</strong>.
-              {pit38.Poz51PodatekDoZaplaty > 0 && (
-                <span> Tax of <Val v={pit38.Poz51PodatekDoZaplaty} /> must be paid by the same date.</span>
+              {pit38.poz51PodatekDoZaplaty > 0 && (
+                <span> Tax of <Val v={pit38.poz51PodatekDoZaplaty} /> must be paid by the same date.</span>
               )}
             </p>
           </GuideStep>
@@ -454,6 +443,74 @@ function GuideStep({ n, title, children }: { n: number; title: string; children:
       <div className="text-slate-300 text-sm space-y-2 ml-9">
         {children}
       </div>
+    </div>
+  );
+}
+
+// Per-year check of the prior-year losses entered at import (computed by PriorYearLossCalculator on the backend).
+function PriorYearLossBreakdown({ pit38 }: { pit38: Pit38Fields }) {
+  if (pit38.priorYearLosses.length === 0 && pit38.warnings.length === 0) return null;
+  const th = 'text-slate-500 text-xs font-medium px-3 py-2';
+  const td = 'px-3 py-2 font-mono tabular-nums text-right';
+
+  return (
+    <div className="border-t border-slate-700/50">
+      {pit38.priorYearLosses.length > 0 && (
+        <div className="px-6 py-4 overflow-x-auto">
+          <p className="text-slate-400 text-xs uppercase tracking-wider font-medium mb-2">
+            Prior-year losses check (poz. 30, art. 9 ust. 3)
+          </p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700/50">
+                <th className={`${th} text-left`}>Loss year</th>
+                <th className={`${th} text-right`}>Loss</th>
+                <th className={`${th} text-right`}>Deducted before</th>
+                <th className={`${th} text-right`}>Available</th>
+                <th className={`${th} text-right`}>Deducted in {pit38.year}</th>
+                <th className={`${th} text-right`}>Left after {pit38.year}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pit38.priorYearLosses.map((line) => {
+                const problem = !line.eligible || line.expiresAfterThisYear;
+                const muted = !line.eligible ? 'text-slate-500' : 'text-slate-200';
+                return (
+                  <Fragment key={line.year}>
+                    <tr className={muted}>
+                      <td className="px-3 py-2 font-mono">{line.year}</td>
+                      <td className={td}>{formatPln(line.lossPln)}</td>
+                      <td className={td}>{formatPln(line.deductedPln)}</td>
+                      <td className={td}>{formatPln(line.remainingPln)}</td>
+                      <td className={`${td} ${line.appliedPln > 0 ? 'text-green-400 font-medium' : ''}`}>{formatPln(line.appliedPln)}</td>
+                      <td className={`${td} ${line.expiresAfterThisYear ? 'text-amber-400' : ''}`}>{formatPln(line.unusedPln)}</td>
+                    </tr>
+                    {line.notes.length > 0 && (
+                      <tr>
+                        <td colSpan={6} className={`px-3 pb-3 text-xs ${problem ? 'text-amber-400' : 'text-slate-500'}`}>
+                          {line.notes.map((note, i) => (
+                            <span key={i} className="block">{note}</span>
+                          ))}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {pit38.warnings.length > 0 && (
+        <div className="mx-6 mb-4 bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 text-sm text-amber-200 space-y-2">
+          {pit38.warnings.map((warning, i) => (
+            <div key={i} className="flex gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-300" />
+              <span>{warning}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

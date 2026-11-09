@@ -66,7 +66,10 @@ public class NbpExchangeRateService : INbpExchangeRateService
                 continue;
             }
 
-            using (response!)
+            if (response is null)
+                continue;
+
+            using (response)
             {
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {

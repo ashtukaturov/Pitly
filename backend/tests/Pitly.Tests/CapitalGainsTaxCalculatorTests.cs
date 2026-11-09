@@ -6,6 +6,55 @@ namespace Pitly.Tests;
 public class CapitalGainsTaxCalculatorTests
 {
     [Fact]
+    public async Task CalculateAsync_ReportsGrossProceedsAndPutsSellCommissionIntoCosts()
+    {
+        var rateService = new TestRateService(new Dictionary<string, decimal>
+        {
+            ["USD"] = 4m
+        });
+        var calculator = new CapitalGainsTaxCalculator(rateService);
+
+        var trades = new List<Trade>
+        {
+            new(
+                Symbol: "ABC",
+                Currency: "USD",
+                DateTime: new DateTime(2025, 1, 2, 10, 0, 0),
+                Quantity: 10m,
+                Price: 10m,
+                Proceeds: 100m,
+                Commission: 1m,
+                CommissionCurrency: "USD",
+                RealizedPnL: 0m,
+                Type: TradeType.Buy,
+                Isin: "US1111111111"),
+            new(
+                Symbol: "ABC",
+                Currency: "USD",
+                DateTime: new DateTime(2025, 2, 2, 10, 0, 0),
+                Quantity: 10m,
+                Price: 15m,
+                Proceeds: 150m,
+                Commission: 2m,
+                CommissionCurrency: "USD",
+                RealizedPnL: 0m,
+                Type: TradeType.Sell,
+                Isin: "US1111111111")
+        };
+
+        var results = await calculator.CalculateAsync(
+            new ParsedStatement(trades, [], []),
+            TaxPeriod.FullYear(2025));
+        var sellResult = Assert.Single(results, r => r.Type == TradeType.Sell);
+
+        // Przychód (poz. 22) = gross sale value 150 USD x 4 = 600 PLN
+        Assert.Equal(600m, sellResult.ProceedsPln);
+        // Koszty (poz. 23) = purchase 400 + buy commission 4 + sell commission 8 = 412 PLN
+        Assert.Equal(412m, sellResult.CostPln);
+        Assert.Equal(188m, sellResult.GainLossPln);
+    }
+
+    [Fact]
     public async Task CalculateAsync_UsesIsinForFifoMatching()
     {
         var rateService = new TestRateService(new Dictionary<string, decimal>

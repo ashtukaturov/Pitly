@@ -25,6 +25,7 @@ export default function App() {
   const [state, setState] = useState<AppState>({
     sessionId: null,
     summary: null,
+    pit38: null,
     trades: [],
     dividends: [],
   });

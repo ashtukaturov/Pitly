@@ -1,5 +1,7 @@
 using System.Globalization;
+using Pitly.Api.Mapping;
 using Pitly.Api.Services;
+using Pitly.Core.Models;
 
 namespace Pitly.Api.Endpoints;
 
@@ -33,6 +35,9 @@ public static class ImportEndpoints
                 residencyStartDate = parsedResidencyStartDate.Date;
             }
 
+            if (!PriorYearLossJson.TryParseInput(form["priorYearLosses"].FirstOrDefault(), out var priorYearLosses, out var lossError))
+                return Results.BadRequest(new { error = lossError });
+
             var files = form.Files
                 .Where(f => f.Length > 0)
                 .ToList();
@@ -55,7 +60,10 @@ public static class ImportEndpoints
                 var streams = files.Select(file => file.OpenReadStream()).ToList();
                 try
                 {
-                    var result = await importService.ImportStatementsAsync(streams, residencyStartDate);
+                    var result = await importService.ImportStatementsAsync(streams, residencyStartDate, priorYearLosses);
+                    // Single source of truth for the form values: computed here with decimal arithmetic
+                    // instead of being re-derived on the frontend with floating point.
+                    var pit38 = Pit38Fields.FromSummary(result.Summary);
 
                     return Results.Ok(new
                     {
@@ -68,11 +76,15 @@ public static class ImportEndpoints
                             result.Summary.CapitalGainTaxPln,
                             result.Summary.TotalDividendsPln,
                             result.Summary.TotalWithholdingPln,
+                            result.Summary.TotalCreditableWithholdingPln,
                             result.Summary.DividendTaxOwedPln,
                             result.Summary.Year,
                             result.Summary.TaxableFrom,
-                            result.Summary.TaxableTo
+                            result.Summary.TaxableTo,
+                            PriorYearLossPln = pit38.Poz30StratyZLatUbieglych,
+                            result.Summary.Warnings
                         },
+                        pit38,
                         trades = result.Summary.TradeResults,
                         dividends = result.Summary.Dividends
                     });

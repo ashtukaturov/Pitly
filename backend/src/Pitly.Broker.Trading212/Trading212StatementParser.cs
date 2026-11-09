@@ -6,7 +6,7 @@ using static Pitly.Core.Parsing.CsvHelpers;
 
 namespace Pitly.Broker.Trading212;
 
-public class Trading212StatementParser : IStatementParser
+public partial class Trading212StatementParser : IStatementParser
 {
     private static readonly string[] DateTimeFormats =
         ["yyyy-MM-dd HH:mm:ss.fff", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"];
@@ -55,6 +55,8 @@ public class Trading212StatementParser : IStatementParser
         var trades = new List<Trade>();
         var dividends = new List<RawDividend>();
         var withholdingTaxes = new List<RawWithholdingTax>();
+        var splitRows = new List<SplitRow>();
+        var warnings = new List<string>();
 
         for (int i = 1; i < lines.Length; i++)
         {
@@ -70,6 +72,13 @@ public class Trading212StatementParser : IStatementParser
 
             var normalizedAction = NormalizeAction(action);
 
+            // Checked before buy/sell so a future action name containing those words cannot be mistaken for a trade.
+            if (IsStockSplitAction(normalizedAction))
+            {
+                splitRows.Add(ParseSplitRow(fields, columnMap, normalizedAction, lineNumber));
+                continue;
+            }
+
             if (TryGetTradeType(normalizedAction, out var tradeType))
             {
                 trades.Add(ParseTrade(fields, columnMap, tradeType, lineNumber));
@@ -79,6 +88,12 @@ public class Trading212StatementParser : IStatementParser
             if (IsDividendAction(normalizedAction))
             {
                 ParseDividend(fields, columnMap, dividends, withholdingTaxes, lineNumber);
+                continue;
+            }
+
+            if (IsInterestAction(normalizedAction))
+            {
+                ParseInterest(fields, columnMap, dividends, lineNumber);
                 continue;
             }
 
@@ -104,7 +119,9 @@ public class Trading212StatementParser : IStatementParser
             trades,
             dividends,
             withholdingTaxes,
-            StatementYear: DetermineStatementYear(trades, dividends, withholdingTaxes));
+            CorporateActions: BuildStockSplits(splitRows, warnings),
+            StatementYear: DetermineStatementYear(trades, dividends, withholdingTaxes),
+            Warnings: warnings);
     }
 
     private record HeaderColumn(int Index, string RawName, string? CurrencyCode);
@@ -226,6 +243,49 @@ public class Trading212StatementParser : IStatementParser
                 Amount: withholding.Amount,
                 Isin: row.Isin));
         }
+    }
+
+    private void ParseInterest(
+        List<string> fields,
+        Dictionary<string, HeaderColumn> columnMap,
+        List<RawDividend> income,
+        int lineNumber)
+    {
+        // "Interest on cash" / "Lending interest" rows carry the amount in the Total column (account currency).
+        var timeStr = RequireField(fields, columnMap, "time", "interest", lineNumber);
+        if (!TryParseDateTime(timeStr, out var dateTime))
+        {
+            throw new FormatException(
+                $"Could not parse date '{timeStr}' for interest row on line {lineNumber}.");
+        }
+
+        var rawTotal = GetField(fields, columnMap, "total");
+        if (string.IsNullOrEmpty(rawTotal))
+            return;
+
+        if (!TryParseDecimal(rawTotal, out var signedAmount))
+        {
+            throw new FormatException(
+                $"Could not parse interest amount '{rawTotal}' on line {lineNumber}.");
+        }
+
+        if (signedAmount <= 0)
+            return; // interest charged to the account is not deductible for individuals
+
+        var total = TryParseMoneyAmount(fields, columnMap, "total", string.Empty, lineNumber);
+        if (total is null || string.IsNullOrEmpty(total.Currency))
+        {
+            throw new FormatException(
+                $"Could not determine the currency of the interest row on line {lineNumber}.");
+        }
+
+        income.Add(new RawDividend(
+            Symbol: $"{total.Currency} interest",
+            Currency: total.Currency,
+            Date: dateTime.Date,
+            Amount: total.Amount,
+            Isin: null,
+            Kind: IncomeKind.Interest));
     }
 
     private MoneyAmount ParseTradeFees(
@@ -456,6 +516,9 @@ public class Trading212StatementParser : IStatementParser
 
     private static bool IsDividendAction(string action)
         => action.StartsWith("dividend", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsInterestAction(string action)
+        => ContainsWord(action, "interest");
 
     private static bool ContainsWord(string action, string word)
     {

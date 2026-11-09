@@ -1,3 +1,5 @@
+using Pitly.Core.Tax;
+
 namespace Pitly.Core.Models;
 
 /// <summary>
@@ -21,7 +23,9 @@ public record Pit38Fields(
     decimal Poz27Strata,
 
     // ── Section D: Obliczenie zobowiązania podatkowego — art. 30b ust. 1 ustawy ──
-    // Poz. 31: Podstawa obliczenia podatku (rounded to full PLN per art. 63 § 1 O.p.)
+    // Poz. 30: Straty z lat ubiegłych (cannot exceed the income it is deducted from)
+    decimal Poz30StratyZLatUbieglych,
+    // Poz. 31: Podstawa obliczenia podatku = dochód minus poz. 30 (rounded to full PLN per art. 63 § 1 O.p.)
     decimal Poz31PodstawaObliczenia,
     // Poz. 33: Podatek = poz. 31 × 19%
     decimal Poz33Podatek,
@@ -29,17 +33,29 @@ public record Pit38Fields(
     decimal Poz35PodatekNalezny,
 
     // ── Section G: Podatek do zapłaty / Nadpłata ──
-    // Poz. 47: Zryczałtowany podatek 19% od dywidend zagranicznych (art. 30a ust. 1 pkt 1-5)
+    // Poz. 47: Zryczałtowany podatek 19% od przychodów zagranicznych z art. 30a ust. 1 pkt 1-5
+    //          (dywidendy, odsetki, payments in lieu)
     decimal Poz47ZryczaltowanyPodatek,
-    // Poz. 48: Podatek zapłacony za granicą (capped at poz. 47, per art. 30a ust. 9)
+    // Poz. 48: Podatek zapłacony za granicą (treaty-capped, and never above poz. 47, per art. 30a ust. 9)
     decimal Poz48PodatekZaplaconyZaGranica,
     // Poz. 49: Różnica = poz. 47 − poz. 48 (rounded per art. 63 § 1a O.p. — see footnote 8 on PIT-38(18))
     decimal Poz49Roznica,
     // Poz. 51: PODATEK DO ZAPŁATY = poz. 35 + poz. 49
     decimal Poz51PodatekDoZaplaty,
 
+    // ── Danina solidarnościowa (art. 30h) — separate DSF-1 declaration, not a PIT-38 field ──
+    // Excess of the art. 30b income base (poz. 31) over 1 000 000 PLN. Only income known to Pitly is
+    // counted; employment, business and other qualifying incomes also count toward the threshold.
+    decimal DaninaSolidarnosciowaNadwyzka,
+    // 4% of the excess, rounded to full PLN
+    decimal DaninaSolidarnosciowaPln,
+
     // ── Informational (not a PIT-38 field — shown for user reference) ──
-    decimal TotalDividendsPln)
+    decimal TotalDividendsPln,
+
+    // Per-loss breakdown of poz. 30 and warnings about the deduction (art. 9 ust. 3)
+    IReadOnlyList<PriorYearLossLine> PriorYearLosses,
+    IReadOnlyList<string> Warnings)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
@@ -51,18 +67,29 @@ public record Pit38Fields(
         var strata = Math.Round(Math.Max(-difference, 0), 2);
 
         // Section D — Tax calculation
-        var podstawa = RoundToFullPln(dochod);
+        // Prior-year losses (art. 9 ust. 3): deductible over the next 5 years, max 50% of each year's loss
+        // per year (or in one go up to 5 000 000 PLN for losses from 2019+). Each entered loss is checked
+        // against the 5-year window and per-year limits by PriorYearLossCalculator and capped at the income.
+        var lossResult = PriorYearLossCalculator.Apply(summary.PriorYearLosses, summary.Year, dochod);
+        var straty = lossResult.TotalAppliedPln;
+        var podstawa = RoundToFullPln(dochod - straty);
         var podatek = Math.Round(podstawa * TaxConstants.TaxRate, 2);
         var podatekNalezny = RoundToFullPln(podatek);
 
-        // Section G — Dividends
+        // Section G — Dividends, interest, payments in lieu
         // Poz. 47/49 fall under art. 30a ust. 1 — per art. 63 § 1a Ordynacji podatkowej
         // (footnote 8 on PIT-38(18)), amounts are rounded to full groszy upward, not full PLN.
         var zryczaltowanyPodatek = RoundToGroszUp(summary.TotalDividendsPln * TaxConstants.TaxRate);
-        var podatekZaGranica = Math.Round(Math.Min(summary.TotalWithholdingPln, zryczaltowanyPodatek), 2);
+        // Only the treaty-capped (creditable) part of foreign withholding may be entered in poz. 48.
+        var podatekZaGranica = Math.Round(Math.Min(summary.TotalCreditableWithholdingPln, zryczaltowanyPodatek), 2);
         var roznica = RoundToGroszUp(Math.Max(zryczaltowanyPodatek - podatekZaGranica, 0));
 
         var podatekDoZaplaty = podatekNalezny + roznica;
+
+        // Danina solidarnościowa — art. 30h: 4% of the excess over 1 000 000 PLN. Prior-year losses reduce
+        // the base (interpretacja ogólna MF, 2023). Art. 30a income (dividends, interest) is NOT included.
+        var daninaNadwyzka = Math.Max(podstawa - TaxConstants.SolidarityLevyThresholdPln, 0);
+        var danina = RoundToFullPln(daninaNadwyzka * TaxConstants.SolidarityLevyRate);
 
         return new Pit38Fields(
             Year: summary.Year,
@@ -72,6 +99,7 @@ public record Pit38Fields(
             Poz25RazemKoszty: koszty,
             Poz26Dochod: dochod,
             Poz27Strata: strata,
+            Poz30StratyZLatUbieglych: straty,
             Poz31PodstawaObliczenia: podstawa,
             Poz33Podatek: podatek,
             Poz35PodatekNalezny: podatekNalezny,
@@ -79,7 +107,11 @@ public record Pit38Fields(
             Poz48PodatekZaplaconyZaGranica: podatekZaGranica,
             Poz49Roznica: roznica,
             Poz51PodatekDoZaplaty: podatekDoZaplaty,
-            TotalDividendsPln: summary.TotalDividendsPln);
+            DaninaSolidarnosciowaNadwyzka: daninaNadwyzka,
+            DaninaSolidarnosciowaPln: danina,
+            TotalDividendsPln: summary.TotalDividendsPln,
+            PriorYearLosses: lossResult.Lines,
+            Warnings: lossResult.Warnings);
     }
 
     /// <summary>

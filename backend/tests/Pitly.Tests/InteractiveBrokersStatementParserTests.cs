@@ -48,6 +48,53 @@ public class InteractiveBrokersStatementParserTests
     }
 
     [Fact]
+    public void Parse_ParsesInterestAndPaymentInLieuAsSeparateIncomeKinds()
+    {
+        var csv = """
+                  Statement,Data,Period,"January 1, 2025 - December 31, 2025"
+                  Dividends,Header,Currency,Date,Description,Amount
+                  Dividends,Data,USD,2025-06-14,AAPL(US0378331005) Cash Dividend USD 0.25 per Share (Ordinary Dividend),2.50
+                  Dividends,Data,Total,,,2.50
+                  Payment In Lieu Of Dividends,Header,Currency,Date,Description,Amount
+                  Payment In Lieu Of Dividends,Data,USD,2025-06-14,AAPL(US0378331005) Payment in Lieu of Dividend (Ordinary Dividend),1.00
+                  Payment In Lieu Of Dividends,Data,Total,,,1.00
+                  Withholding Tax,Header,Currency,Date,Description,Amount,Code
+                  Withholding Tax,Data,USD,2025-06-14,AAPL(US0378331005) Cash Dividend USD 0.25 per Share - US Tax,-0.38,
+                  Withholding Tax,Data,USD,2025-06-14,AAPL(US0378331005) Payment in Lieu of Dividend - US Tax,-0.30,
+                  Withholding Tax,Data,Total,,,-0.68,
+                  Interest,Header,Currency,Date,Description,Amount
+                  Interest,Data,USD,2025-03-05,USD Credit Interest for Feb-2025,12.34
+                  Interest,Data,USD,2025-04-03,USD Debit Interest for Mar-2025,-3.00
+                  Interest,Data,Total,,,9.34
+                  Interest,Data,Total in USD,,,9.34
+                  """;
+
+        var parsed = Parser.Parse(csv);
+
+        Assert.Equal(3, parsed.Dividends.Count);
+
+        var dividend = Assert.Single(parsed.Dividends, d => d.Kind == IncomeKind.Dividend);
+        Assert.Equal("AAPL", dividend.Symbol);
+        Assert.Equal(2.50m, dividend.Amount);
+
+        var paymentInLieu = Assert.Single(parsed.Dividends, d => d.Kind == IncomeKind.PaymentInLieu);
+        Assert.Equal("AAPL", paymentInLieu.Symbol);
+        Assert.Equal("US0378331005", paymentInLieu.Isin);
+        Assert.Equal(1.00m, paymentInLieu.Amount);
+
+        // Only credit interest is income; debit (margin) interest is ignored.
+        var interest = Assert.Single(parsed.Dividends, d => d.Kind == IncomeKind.Interest);
+        Assert.Equal("USD", interest.Currency);
+        Assert.Equal(new DateTime(2025, 3, 5), interest.Date);
+        Assert.Equal(12.34m, interest.Amount);
+        Assert.Null(interest.Isin);
+
+        Assert.Equal(2, parsed.WithholdingTaxes.Count);
+        Assert.Equal(0.38m, Assert.Single(parsed.WithholdingTaxes, t => t.Kind == IncomeKind.Dividend).Amount);
+        Assert.Equal(0.30m, Assert.Single(parsed.WithholdingTaxes, t => t.Kind == IncomeKind.PaymentInLieu).Amount);
+    }
+
+    [Fact]
     public void Parse_RegistersIsinUnderEveryTickerAlias()
     {
         var csv = """
@@ -84,6 +131,7 @@ public class InteractiveBrokersStatementParserTests
         Assert.Equal(1m, split.Numerator);
         Assert.Equal(5m, split.Denominator);
         Assert.Equal("US74347Y7489", split.Isin);
+        Assert.Equal("US74347Y7638", split.SourceIsin);
     }
 
     [Fact]

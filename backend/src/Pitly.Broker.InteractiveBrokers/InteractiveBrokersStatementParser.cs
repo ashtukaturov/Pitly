@@ -30,13 +30,15 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var corporateActionRows = new List<List<string>>();
         var carryInRows = new List<List<string>>();
         var grantRows = new List<List<string>>();
+        var interestRows = new List<List<string>>();
+        var paymentInLieuRows = new List<List<string>>();
         var symbolToIsin = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var trades = new List<Trade>();
         var dividends = new List<RawDividend>();
         var withholdingTaxes = new List<RawWithholdingTax>();
         var corporateActions = new List<CorporateAction>();
         var carryInPositions = new List<CarryInPosition>();
-        var unsupportedCorporateActions = new List<string>();
+        var warnings = new List<string>();
 
         var hasTrades = false;
         var hasDividends = false;
@@ -82,10 +84,18 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
                 case "Grant Activity":
                     grantRows.Add(fields);
                     break;
+                case "Interest":
+                case "Broker Interest Received":
+                    interestRows.Add(fields);
+                    break;
+                case "Payment In Lieu Of Dividends":
+                    paymentInLieuRows.Add(fields);
+                    break;
             }
         }
 
-        if (!hasTrades && !hasDividends && !hasWithholding && grantRows.Count == 0)
+        if (!hasTrades && !hasDividends && !hasWithholding && grantRows.Count == 0 &&
+            interestRows.Count == 0 && paymentInLieuRows.Count == 0)
             throw new FormatException(
                 "File does not appear to be an IB Activity Statement. Please export in CSV format.");
 
@@ -98,23 +108,21 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         foreach (var fields in dividendRows)
             TryParseDividend(fields, dividends);
 
+        foreach (var fields in paymentInLieuRows)
+            TryParsePaymentInLieu(fields, dividends);
+
+        foreach (var fields in interestRows)
+            TryParseInterest(fields, dividends);
+
         foreach (var fields in withholdingRows)
             TryParseWithholdingTax(fields, withholdingTaxes);
 
         statementYear ??= InferStatementYear(trades, dividends, withholdingTaxes);
 
-        foreach (var fields in corporateActionRows)
-            TryParseCorporateAction(fields, corporateActions, unsupportedCorporateActions, symbolToIsin);
+        corporateActions.AddRange(ParseCorporateActions(corporateActionRows, symbolToIsin, warnings));
 
         foreach (var fields in carryInRows)
             TryParseCarryInPosition(fields, carryInPositions, symbolToIsin, statementYear);
-
-        if (unsupportedCorporateActions.Count > 0)
-        {
-            throw new FormatException(
-                "This Interactive Brokers statement contains unsupported stock corporate actions. " +
-                $"Pitly currently supports stock splits only. First unsupported row: '{unsupportedCorporateActions[0]}'.");
-        }
 
         return new ParsedStatement(
             trades,
@@ -122,7 +130,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             NetWithholdingTaxes(withholdingTaxes),
             corporateActions,
             carryInPositions,
-            statementYear);
+            statementYear,
+            warnings);
     }
 
     private void TryParseTrade(
@@ -300,19 +309,73 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         dividends.Add(new RawDividend(symbol, currency, date, amount, isin));
     }
 
+    private void TryParsePaymentInLieu(List<string> fields, List<RawDividend> income)
+    {
+        // CSV: Payment In Lieu Of Dividends,Data,Currency,Date,Description,Amount
+        // Description looks like "AAPL(US0378331005) Payment in Lieu of Dividend (Ordinary Dividend)".
+        var row = TryParseIncomeRow(fields, "payment in lieu");
+        if (row is null) return;
+        var (symbol, isin, currency, date, amount) = row.Value;
+        income.Add(new RawDividend(symbol, currency, date, amount, isin, IncomeKind.PaymentInLieu));
+    }
+
+    private void TryParseInterest(List<string> fields, List<RawDividend> income)
+    {
+        // CSV: Interest,Data,Currency,Date,Description,Amount
+        // e.g. Interest,Data,USD,2025-03-05,USD Credit Interest for Feb-2025,12.34
+        //      Interest,Data,Total,,,12.34 / Interest,Data,Total in USD,,,12.34 (skipped)
+        if (fields.Count < 6 || Clean(fields[1]) != "Data") return;
+
+        var currency = Clean(fields[2]);
+        var dateStr = Clean(fields[3]);
+        var description = Clean(fields[4]);
+        var amountStr = Clean(fields[5]);
+
+        if (currency.StartsWith("Total", StringComparison.OrdinalIgnoreCase) ||
+            description.Contains("Total", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!TryParseDate(dateStr, out var date))
+        {
+            _logger.LogWarning("Skipping interest row: could not parse date '{DateStr}'", dateStr);
+            return;
+        }
+        if (!TryParseDecimal(amountStr, out var amount))
+        {
+            _logger.LogWarning("Skipping interest row on {Date}: could not parse amount '{AmountStr}'", dateStr, amountStr);
+            return;
+        }
+
+        if (amount <= 0)
+        {
+            // Debit (margin) interest paid to the broker is not deductible from art. 30a income for individuals.
+            _logger.LogInformation("Ignoring debit interest of {Amount} {Currency} on {Date}", amount, currency, dateStr);
+            return;
+        }
+
+        income.Add(new RawDividend($"{currency} interest", currency, date, amount, null, IncomeKind.Interest));
+    }
+
     private void TryParseWithholdingTax(List<string> fields, List<RawWithholdingTax> taxes)
     {
         var row = TryParseIncomeRow(fields, "withholding tax");
         if (row is null) return;
         var (symbol, isin, currency, date, amount) = row.Value;
-        taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin));
+
+        // IB labels withholding on substitute payments "... Payment in Lieu of Dividend - US Tax".
+        var description = Clean(fields[4]);
+        var kind = description.Contains("Payment in Lieu", StringComparison.OrdinalIgnoreCase)
+            ? IncomeKind.PaymentInLieu
+            : IncomeKind.Dividend;
+
+        taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin, kind));
     }
 
     private static List<RawDividend> NetDividends(List<RawDividend> dividends)
     {
         return dividends
-            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date))
-            .Select(g => new RawDividend(g.Key.Symbol, g.Key.Currency, g.Key.Date, g.Sum(d => d.Amount), g.Key.Isin))
+            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind))
+            .Select(g => new RawDividend(g.Key.Symbol, g.Key.Currency, g.Key.Date, g.Sum(d => d.Amount), g.Key.Isin, g.Key.Kind))
             .Where(d => d.Amount > 0)
             .ToList();
     }
@@ -320,8 +383,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
     private static List<RawWithholdingTax> NetWithholdingTaxes(List<RawWithholdingTax> taxes)
     {
         return taxes
-            .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date))
-            .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, Math.Abs(g.Sum(t => t.Amount)), g.Key.Isin))
+            .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date, t.Kind))
+            .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, Math.Abs(g.Sum(t => t.Amount)), g.Key.Isin, g.Key.Kind))
             .Where(t => t.Amount > 0)
             .ToList();
     }
@@ -339,9 +402,6 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
 
     [GeneratedRegex(@"^\s*(?<symbol>\w+)\s*\((?<isin>[^)]+)\)", RegexOptions.IgnoreCase)]
     private static partial Regex InstrumentDescriptionRegex();
-
-    [GeneratedRegex(@"^\s*(?<symbol>\w+)\s*\((?<isin>[^)]+)\)\s+(?:Reverse\s+)?Split\s+(?<num>\d+(?:\.\d+)?)\s+for\s+(?<den>\d+(?:\.\d+)?)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex StockSplitRegex();
 
     private void TryParseStatementYear(List<string> fields, ref int? statementYear)
     {
@@ -372,60 +432,6 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         // ISIN attaches to trades regardless of which name they reference.
         foreach (var part in symbolField.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             symbolToIsin[part] = isin;
-    }
-
-    private void TryParseCorporateAction(
-        List<string> fields,
-        List<CorporateAction> corporateActions,
-        List<string> unsupportedCorporateActions,
-        IReadOnlyDictionary<string, string> symbolToIsin)
-    {
-        if (fields.Count < 7 || Clean(fields[1]) != "Data" || Clean(fields[2]) != "Stocks")
-            return;
-
-        var description = Clean(fields[6]);
-        if (string.IsNullOrWhiteSpace(description) || description.Contains("Total", StringComparison.OrdinalIgnoreCase))
-            return;
-
-        var match = StockSplitRegex().Match(description);
-        if (!match.Success)
-        {
-            unsupportedCorporateActions.Add(description);
-            return;
-        }
-
-        // IB emits a split as two rows: a positive-quantity credit of the new shares and a
-        // negative-quantity debit of the old shares (often with the .OLD alias). Both rows match
-        // the split regex, so without skipping the debit we'd apply the split factor twice.
-        if (fields.Count > 7 && TryParseDecimal(Clean(fields[7]), out var quantity) && quantity <= 0)
-            return;
-
-        var dateTimeStr = Clean(fields[5]);
-        if (!TryParseDateTime(dateTimeStr, out var dateTime))
-        {
-            _logger.LogWarning("Skipping corporate action row: could not parse date '{DateStr}'", dateTimeStr);
-            return;
-        }
-
-        if (!TryParseDecimal(match.Groups["num"].Value, out var numerator) ||
-            !TryParseDecimal(match.Groups["den"].Value, out var denominator))
-        {
-            unsupportedCorporateActions.Add(description);
-            return;
-        }
-
-        var symbol = match.Groups["symbol"].Value;
-        var isin = match.Groups["isin"].Value;
-        if (string.IsNullOrWhiteSpace(isin) && symbolToIsin.TryGetValue(symbol, out var mappedIsin))
-            isin = mappedIsin;
-
-        corporateActions.Add(new CorporateAction(
-            Symbol: symbol,
-            DateTime: dateTime,
-            Type: CorporateActionType.StockSplit,
-            Numerator: numerator,
-            Denominator: denominator,
-            Isin: string.IsNullOrWhiteSpace(isin) ? null : isin));
     }
 
     private void TryParseCarryInPosition(

@@ -74,9 +74,11 @@ public static class SessionEndpoints
                 session.TotalProceedsPln, session.TotalCostPln,
                 session.CapitalGainPln, session.CapitalGainTaxPln,
                 session.TotalDividendsPln, session.TotalWithholdingPln,
+                session.TotalCreditableWithholdingPln,
                 session.DividendTaxOwedPln, session.Year,
                 taxPeriod.TaxableFrom, taxPeriod.TaxableTo,
-                [], []);
+                [], [],
+                PriorYearLossJson.Deserialize(session.PriorYearLossesJson));
 
             var pit38 = Pit38Fields.FromSummary(summary);
             return Results.Ok(pit38);

@@ -7,10 +7,13 @@ public class DividendEntity
     public string Symbol { get; set; } = "";
     public string Currency { get; set; } = "";
     public DateTime Date { get; set; }
+    public string Kind { get; set; } = "Dividend";
     public decimal AmountOriginal { get; set; }
     public decimal WithholdingTaxOriginal { get; set; }
     public decimal AmountPln { get; set; }
     public decimal WithholdingTaxPln { get; set; }
+    public decimal CreditableWithholdingPln { get; set; }
+    public decimal? MaxCreditableRate { get; set; }
     public decimal ExchangeRate { get; set; }
     public bool RateUnavailable { get; set; }
 }

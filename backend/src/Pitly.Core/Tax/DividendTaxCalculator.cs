@@ -55,14 +55,24 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                 withholdingPln += tax.Amount * withholdingRate;
             }
 
+            // Art. 30a ust. 9: the foreign tax credit cannot exceed 19% of the dividend. On top of that,
+            // only tax withheld in line with the applicable treaty is creditable: the excess (e.g. 30% US
+            // withholding without a W-8BEN) must be reclaimed abroad, not offset against Polish tax.
+            var treatyRate = TreatyWithholdingRates.GetMaxCreditableRate(div.Isin);
+            var maxCreditableRate = treatyRate ?? TaxConstants.TaxRate;
+            var creditableWithholdingPln = Math.Min(withholdingPln, amountPln * maxCreditableRate);
+
             results.Add(new Dividend(
                 Symbol: div.Symbol,
                 Currency: div.Currency,
                 Date: div.Date,
+                Kind: div.Kind,
                 AmountOriginal: div.Amount,
                 WithholdingTaxOriginal: withholdingAmount,
                 AmountPln: amountPln,
                 WithholdingTaxPln: withholdingPln,
+                CreditableWithholdingPln: creditableWithholdingPln,
+                MaxCreditableRate: treatyRate,
                 ExchangeRate: rate));
         }
 
@@ -71,6 +81,11 @@ public class DividendTaxCalculator : IDividendTaxCalculator
 
     private static bool IsMatch(RawDividend dividend, RawWithholdingTax tax)
     {
+        // A dividend and a payment in lieu for the same instrument can land on the same day
+        // (partially lent position); their withholding rows must not be attributed to both.
+        if (dividend.Kind != tax.Kind)
+            return false;
+
         if (dividend.Date != tax.Date)
             return false;
 

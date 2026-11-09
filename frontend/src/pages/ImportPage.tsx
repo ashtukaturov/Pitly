@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { Upload, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { importFiles } from '../api';
 import type { AppState } from '../types';
+import PriorYearLossesInput from '../components/PriorYearLossesInput';
+import { validatePriorYearLossRows, type PriorYearLossRow } from '../priorYearLosses';
 
 type Step = 'idle' | 'parsing' | 'rates' | 'calculating' | 'done' | 'error';
 
@@ -37,6 +39,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
   const [error, setError] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [residencyStartDate, setResidencyStartDate] = useState('');
+  const [priorYearLosses, setPriorYearLosses] = useState<PriorYearLossRow[]>([]);
 
   const [dragOver, setDragOver] = useState(false);
 
@@ -64,7 +67,15 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
     const timer2 = setTimeout(() => setStep('calculating'), 1200);
 
     try {
-      const result = await importFiles(allFiles, residencyStartDate || undefined);
+      const lossCheck = validatePriorYearLossRows(priorYearLosses);
+      if (lossCheck.error) {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        setStep('error');
+        setError(lossCheck.error);
+        return;
+      }
+      const result = await importFiles(allFiles, residencyStartDate || undefined, lossCheck.losses.length > 0 ? lossCheck.losses : undefined);
       clearTimeout(timer1);
       clearTimeout(timer2);
       setPendingFiles([]);
@@ -73,6 +84,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
         onComplete({
           sessionId: result.sessionId,
           summary: result.summary,
+          pit38: result.pit38,
           trades: result.trades,
           dividends: result.dividends,
         });
@@ -84,7 +96,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
       setStep('error');
       setError(err instanceof Error ? err.message : 'Import failed');
     }
-  }, [onComplete, pendingFiles, residencyStartDate]);
+  }, [onComplete, pendingFiles, residencyStartDate, priorYearLosses]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -125,6 +137,8 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
             </label>
           </div>
 
+          <PriorYearLossesInput rows={priorYearLosses} onChange={setPriorYearLosses} />
+
           <label
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -162,7 +176,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
               <p>3. Select the full tax year, format: <strong className="text-slate-300">CSV</strong></p>
               <p>4. Even with a mid-year residency start date, still export the full calendar year so FIFO stays correct.</p>
               <p>5. If you sold shares bought in earlier years, upload those earlier yearly CSVs together.</p>
-              <p>6. If the statement includes stock splits, keep the related earlier years in the same upload.</p>
+              <p>6. Stock splits, ISIN changes, mergers and spin-offs from the Corporate Actions section are applied automatically; keep the earlier years that hold the original buys in the same upload.</p>
             </HelpSection>
             <HelpSection title="How to export from Trading 212">
               <p>1. Log in to Trading 212</p>
@@ -171,6 +185,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
               <p>4. Select the full tax year and export as CSV</p>
               <p>5. Even with a mid-year residency start date, still export the full calendar year so FIFO stays correct.</p>
               <p>6. Upload one or more yearly CSVs together if you need prior-year FIFO history</p>
+              <p>7. Stock splits are read from the paired &quot;Stock split close&quot; / &quot;Stock split open&quot; rows, so export the full period that contains both.</p>
             </HelpSection>
           </div>
         </>

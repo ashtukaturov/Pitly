@@ -21,7 +21,10 @@ public class ImportService : IImportService
         _logger = logger;
     }
 
-    public async Task<ImportResult> ImportStatementsAsync(IReadOnlyList<Stream> fileStreams, DateTime? residencyStartDate = null)
+    public async Task<ImportResult> ImportStatementsAsync(
+        IReadOnlyList<Stream> fileStreams,
+        DateTime? residencyStartDate = null,
+        IReadOnlyList<PriorYearLoss>? priorYearLosses = null)
     {
         if (fileStreams.Count == 0)
             throw new FormatException("No files uploaded.");
@@ -49,7 +52,10 @@ public class ImportService : IImportService
         var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate);
         var merged = MergeStatements(statements, taxPeriod.Year);
 
-        var summary = await _calculator.CalculateAsync(merged, taxPeriod);
+        var summary = await _calculator.CalculateAsync(merged, taxPeriod) with
+        {
+            PriorYearLosses = priorYearLosses ?? []
+        };
         _logger.LogInformation(
             "Tax calculation complete for year {Year} from {TaxableFrom}: capital gain {Gain} PLN, dividend tax owed {DivTax} PLN",
             summary.Year,
@@ -125,8 +131,13 @@ public class ImportService : IImportService
             Trades: statements.SelectMany(s => s.Trades).OrderBy(t => t.DateTime).ToList(),
             Dividends: statements.SelectMany(s => s.Dividends).OrderBy(d => d.Date).ToList(),
             WithholdingTaxes: statements.SelectMany(s => s.WithholdingTaxes).OrderBy(t => t.Date).ToList(),
-            CorporateActions: statements.SelectMany(s => s.CorporateActions ?? []).OrderBy(a => a.DateTime).ToList(),
+            // Overlapping exports repeat the same corporate action; apply each event once.
+            CorporateActions: statements.SelectMany(s => s.CorporateActions ?? [])
+                .DistinctBy(a => (a.DateTime, a.Type, a.Symbol, a.Isin, a.SourceSymbol, a.SourceIsin, a.Numerator, a.Denominator, a.Quantity, a.CashProceeds))
+                .OrderBy(a => a.DateTime)
+                .ToList(),
             CarryInPositions: statements.SelectMany(s => s.CarryInPositions ?? []).ToList(),
-            StatementYear: targetYear);
+            StatementYear: targetYear,
+            Warnings: statements.SelectMany(s => s.Warnings ?? []).Distinct().ToList());
     }
 }

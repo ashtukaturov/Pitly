@@ -173,7 +173,12 @@ function Row({ trade: t }: { trade: TradeResult }) {
       <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap" title={t.rateUnavailable ? 'Rate unavailable — manual entry required' : undefined}>
         {formatDate(t.dateTime)}
       </td>
-      <td className="px-3 py-2.5 text-white font-medium">{t.symbol}</td>
+      <td className="px-3 py-2.5 text-white font-medium">
+        {t.symbol}
+        {t.note && (
+          <span className="block text-xs font-normal text-amber-300/90 mt-0.5 max-w-xs" title={t.note}>{t.note}</span>
+        )}
+      </td>
       <td className="px-3 py-2.5">
         <span className={t.type === 'Buy'
           ? 'bg-blue-500/20 text-blue-300 text-xs px-2 py-0.5 rounded-full'

@@ -20,7 +20,7 @@ public static class ExportEndpoints
                 return Results.NotFound(new { error = "Session not found" });
 
             var sb = new StringBuilder();
-            sb.AppendLine("Section,Date,Symbol,Type,Quantity,Price,Proceeds (Original),Commission,Currency,Exchange Rate,Proceeds (PLN),Cost (PLN),Gain/Loss (PLN)");
+            sb.AppendLine("Section,Date,Symbol,Type,Quantity,Price,Proceeds (Original),Commission,Currency,Exchange Rate,Proceeds (PLN),Cost (PLN),Gain/Loss (PLN),Note");
 
             foreach (var t in session.TradeResults.OrderBy(t => t.DateTime))
             {
@@ -36,11 +36,12 @@ public static class ExportEndpoints
                     t.ExchangeRate.ToString("F4", CultureInfo.InvariantCulture),
                     t.ProceedsPln.ToString("F2", CultureInfo.InvariantCulture),
                     t.CostPln.ToString("F2", CultureInfo.InvariantCulture),
-                    t.GainLossPln.ToString("F2", CultureInfo.InvariantCulture)));
+                    t.GainLossPln.ToString("F2", CultureInfo.InvariantCulture),
+                    CsvQuote(t.Note)));
             }
 
             sb.AppendLine();
-            sb.AppendLine("Section,Date,Symbol,Amount (Original),Withholding (Original),Currency,Exchange Rate,Amount (PLN),Withholding (PLN)");
+            sb.AppendLine("Section,Date,Symbol,Type,Amount (Original),Withholding (Original),Currency,Exchange Rate,Amount (PLN),Withholding (PLN),Creditable Withholding (PLN)");
 
             foreach (var d in session.Dividends.OrderBy(d => d.Date))
             {
@@ -48,15 +49,20 @@ public static class ExportEndpoints
                     "Dividend",
                     d.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     d.Symbol,
+                    d.Kind,
                     d.AmountOriginal.ToString(CultureInfo.InvariantCulture),
                     d.WithholdingTaxOriginal.ToString(CultureInfo.InvariantCulture),
                     d.Currency,
                     d.ExchangeRate.ToString("F4", CultureInfo.InvariantCulture),
                     d.AmountPln.ToString("F2", CultureInfo.InvariantCulture),
-                    d.WithholdingTaxPln.ToString("F2", CultureInfo.InvariantCulture)));
+                    d.WithholdingTaxPln.ToString("F2", CultureInfo.InvariantCulture),
+                    d.CreditableWithholdingPln.ToString("F2", CultureInfo.InvariantCulture)));
             }
 
             return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", $"pitly-tax-{session.Year}.csv");
         });
     }
+
+    private static string CsvQuote(string? value)
+        => string.IsNullOrEmpty(value) ? string.Empty : "\"" + value.Replace("\"", "\"\"") + "\"";
 }

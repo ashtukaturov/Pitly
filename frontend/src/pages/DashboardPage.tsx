@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { TrendingUp, Coins, Landmark, CreditCard } from 'lucide-react';
+import { TrendingUp, Coins, Landmark, CreditCard, AlertTriangle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { formatPln, numColor, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState } from '../types';
@@ -50,16 +50,18 @@ export default function DashboardPage({ state }: { state: AppState }) {
       color: numColor(summary.capitalGainPln),
     },
     {
-      label: 'Dividends',
+      label: 'Dividends & Interest',
       value: summary.totalDividendsPln,
       sub: `${state.dividends.length} payments`,
       icon: Coins,
       color: 'text-blue-400',
     },
     {
-      label: 'Tax Paid (US)',
-      value: summary.totalWithholdingPln,
-      sub: 'Withholding tax credited',
+      label: 'Foreign Tax Credited',
+      value: summary.totalCreditableWithholdingPln,
+      sub: summary.totalWithholdingPln > summary.totalCreditableWithholdingPln + 0.005
+        ? `Withheld ${formatPln(summary.totalWithholdingPln)}, treaty cap applied`
+        : 'Withholding tax credited',
       icon: Landmark,
       color: 'text-amber-400',
     },
@@ -82,10 +84,24 @@ export default function DashboardPage({ state }: { state: AppState }) {
         </p>
         {customTaxPeriod && (
           <p className="text-slate-500 text-sm mt-1">
-            Earlier uploaded trades are still replayed internally to reconstruct FIFO lots and stock splits.
+            Earlier uploaded trades are still replayed internally to reconstruct FIFO lots and corporate actions.
           </p>
         )}
       </div>
+
+      {summary.warnings?.length > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 text-sm text-amber-200">
+          <p className="font-semibold text-amber-100 mb-2 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-300" />
+            Please review: {summary.warnings.length} {summary.warnings.length === 1 ? 'item' : 'items'} from your statements
+          </p>
+          <ul className="space-y-1.5 list-disc list-inside">
+            {summary.warnings.map((warning, i) => (
+              <li key={i}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {cards.map((c) => (
