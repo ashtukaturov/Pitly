@@ -30,4 +30,6 @@ public record TradeResult(
     decimal GainLossPln,
     bool RateUnavailable = false,
     // Explains synthetic rows created from corporate actions (cash merger, spin-off shares, cash in lieu)
-    string? Note = null);
+    string? Note = null,
+    // Issuer ISIN, used to attribute the income to a country for PIT/ZG
+    string? Isin = null);

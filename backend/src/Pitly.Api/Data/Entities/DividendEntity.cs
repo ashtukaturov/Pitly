@@ -16,4 +16,5 @@ public class DividendEntity
     public decimal? MaxCreditableRate { get; set; }
     public decimal ExchangeRate { get; set; }
     public bool RateUnavailable { get; set; }
+    public string? Isin { get; set; }
 }

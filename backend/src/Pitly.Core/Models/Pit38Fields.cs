@@ -55,7 +55,10 @@ public record Pit38Fields(
 
     // Per-loss breakdown of poz. 30 and warnings about the deduction (art. 9 ust. 3)
     IReadOnlyList<PriorYearLossLine> PriorYearLosses,
-    IReadOnlyList<string> Warnings)
+    IReadOnlyList<string> Warnings,
+
+    // PIT/ZG annex: art. 30b income per issuer country (dividend figures included for reference only)
+    IReadOnlyList<CountryIncome> PitZg)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
@@ -111,7 +114,8 @@ public record Pit38Fields(
             DaninaSolidarnosciowaPln: danina,
             TotalDividendsPln: summary.TotalDividendsPln,
             PriorYearLosses: lossResult.Lines,
-            Warnings: lossResult.Warnings);
+            Warnings: lossResult.Warnings,
+            PitZg: summary.Countries ?? []);
     }
 
     /// <summary>

@@ -261,4 +261,37 @@ public class TaxCalculatorTests
             Dividends: [],
             PriorYearLosses: priorYearLoss > 0 ? [new PriorYearLoss(2023, priorYearLoss)] : []);
     }
+
+    [Fact]
+    public async Task CalculateAsync_BreaksDownIncomeByIssuerCountryForPitZg()
+    {
+        var rates = new TestRateService(new Dictionary<string, decimal> { ["USD"] = 4m });
+        var calculator = new TaxCalculator(new CapitalGainsTaxCalculator(rates), new DividendTaxCalculator(rates));
+        var statement = new ParsedStatement(
+            Trades:
+            [
+                new Trade("AAPL", "USD", new DateTime(2025, 1, 10), 10m, 100m, 1000m, 0m, "USD", 0m, TradeType.Buy, "US0378331005"),
+                new Trade("AAPL", "USD", new DateTime(2025, 6, 10), 10m, 150m, 1500m, 0m, "USD", 0m, TradeType.Sell, "US0378331005"),
+                new Trade("SAP", "USD", new DateTime(2025, 2, 10), 5m, 200m, 1000m, 0m, "USD", 0m, TradeType.Buy, "DE0007164600"),
+                new Trade("SAP", "USD", new DateTime(2025, 7, 10), 5m, 180m, 900m, 0m, "USD", 0m, TradeType.Sell, "DE0007164600")
+            ],
+            Dividends: [new RawDividend("AAPL", "USD", new DateTime(2025, 5, 15), 10m, "US0378331005")],
+            WithholdingTaxes: [new RawWithholdingTax("AAPL", "USD", new DateTime(2025, 5, 15), 1.5m, "US0378331005")]);
+
+        var summary = await calculator.CalculateAsync(statement, TaxPeriod.FullYear(2025));
+        var pitZg = Pit38Fields.FromSummary(summary).PitZg;
+
+        Assert.Equal(2, pitZg.Count);
+        var us = pitZg.Single(c => c.CountryCode == "US");
+        Assert.Equal("Stany Zjednoczone Ameryki", us.CountryName);
+        Assert.Equal(6000m, us.ProceedsPln);
+        Assert.Equal(4000m, us.CostPln);
+        Assert.Equal(2000m, us.IncomePln);
+        Assert.Equal(0m, us.LossPln);
+        Assert.Equal(40m, us.DividendsPln);
+        Assert.Equal(6m, us.WithholdingPln);
+        var de = pitZg.Single(c => c.CountryCode == "DE");
+        Assert.Equal(0m, de.IncomePln);
+        Assert.Equal(400m, de.LossPln);
+    }
 }

@@ -114,7 +114,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                     ProceedsPln: 0,
                     CostPln: totalBuyCostPln,
                     GainLossPln: 0,
-                    Note: note));
+                    Note: note,
+                    Isin: trade.Isin));
             }
 
             return;
@@ -170,7 +171,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 ProceedsPln: proceedsPln,
                 CostPln: totalCostWithSellCommissionPln,
                 GainLossPln: gainLoss,
-                Note: note));
+                Note: note,
+                Isin: trade.Isin));
         }
     }
 
@@ -318,7 +320,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
             ProceedsPln: proceedsPln,
             CostPln: 0m,
             GainLossPln: proceedsPln,
-            Note: note + " (no matching lots, zero cost)"));
+            Note: note + " (no matching lots, zero cost)",
+            Isin: isCashInLieu ? action.EffectiveSourceIsin : action.Isin));
     }
 
     /// <summary>

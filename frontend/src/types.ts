@@ -15,6 +15,7 @@ export interface TradeResult {
   rateUnavailable: boolean;
   /** Set on rows created from corporate actions (cash merger, spin-off shares, cash in lieu). */
   note?: string | null;
+  isin?: string | null;
 }
 
 /** Flat-tax (art. 30a) income stream. All are taxed at 19% and reported in PIT-38 poz. 47. */
@@ -36,6 +37,23 @@ export interface DividendResult {
   maxCreditableRate: number | null;
   exchangeRate: number;
   rateUnavailable: boolean;
+  isin?: string | null;
+}
+
+/** One PIT/ZG row: income attributed to the issuer country (ISIN prefix). */
+export interface CountryIncome {
+  countryCode: string;
+  countryName: string;
+  proceedsPln: number;
+  costPln: number;
+  incomePln: number;
+  lossPln: number;
+  taxPaidAbroadPln: number;
+  saleCount: number;
+  dividendsPln: number;
+  withholdingPln: number;
+  creditableWithholdingPln: number;
+  dividendCount: number;
 }
 
 export interface TaxSummary {
@@ -105,6 +123,8 @@ export interface Pit38Fields {
   // Prior-year loss check (poz. 30 breakdown) and warnings about the deduction
   priorYearLosses: PriorYearLossLine[];
   warnings: string[];
+  // PIT/ZG annex rows
+  pitZg: CountryIncome[];
 }
 
 export interface ImportResponse {

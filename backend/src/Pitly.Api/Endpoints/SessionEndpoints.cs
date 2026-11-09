@@ -78,7 +78,9 @@ public static class SessionEndpoints
                 session.DividendTaxOwedPln, session.Year,
                 taxPeriod.TaxableFrom, taxPeriod.TaxableTo,
                 [], [],
-                PriorYearLossJson.Deserialize(session.PriorYearLossesJson));
+                PriorYearLossJson.Deserialize(session.PriorYearLossesJson),
+                Warnings: EntityMapper.DeserializeWarnings(session.WarningsJson),
+                Countries: EntityMapper.DeserializeCountries(session.CountriesJson));
 
             var pit38 = Pit38Fields.FromSummary(summary);
             return Results.Ok(pit38);

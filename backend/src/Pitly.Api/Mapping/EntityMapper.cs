@@ -24,6 +24,7 @@ public static class EntityMapper
             PriorYearLossPln = Pit38Fields.FromSummary(summary).Poz30StratyZLatUbieglych,
             PriorYearLossesJson = PriorYearLossJson.Serialize(summary.PriorYearLosses),
             WarningsJson = summary.Warnings is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(summary.Warnings) : null,
+            CountriesJson = summary.Countries is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(summary.Countries) : null,
             TradeResults = summary.TradeResults.Select(t => new TradeResultEntity
             {
                 Symbol = t.Symbol,
@@ -39,7 +40,8 @@ public static class EntityMapper
                 CostPln = t.CostPln,
                 GainLossPln = t.GainLossPln,
                 RateUnavailable = t.RateUnavailable,
-                Note = t.Note
+                Note = t.Note,
+                Isin = t.Isin
             }).ToList(),
             Dividends = summary.Dividends.Select(d => new DividendEntity
             {
@@ -54,7 +56,8 @@ public static class EntityMapper
                 CreditableWithholdingPln = d.CreditableWithholdingPln,
                 MaxCreditableRate = d.MaxCreditableRate,
                 ExchangeRate = d.ExchangeRate,
-                RateUnavailable = d.RateUnavailable
+                RateUnavailable = d.RateUnavailable,
+                Isin = d.Isin
             }).ToList()
         };
     }
@@ -84,6 +87,20 @@ public static class EntityMapper
             session.PriorYearLossPln,
             Warnings = DeserializeWarnings(session.WarningsJson)
         };
+    }
+
+    public static List<CountryIncome> DeserializeCountries(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<CountryIncome>>(json) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
     }
 
     public static List<string> DeserializeWarnings(string? json)

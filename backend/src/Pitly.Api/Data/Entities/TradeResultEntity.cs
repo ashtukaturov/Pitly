@@ -18,4 +18,5 @@ public class TradeResultEntity
     public decimal GainLossPln { get; set; }
     public bool RateUnavailable { get; set; }
     public string? Note { get; set; }
+    public string? Isin { get; set; }
 }

@@ -44,6 +44,8 @@ public class TaxCalculator : ITaxCalculator
         var withholdingCredit = Math.Min(totalCreditableWithholdingPln, polishDividendTax);
         var dividendTaxOwed = Math.Max(polishDividendTax - withholdingCredit, 0);
 
+        var countries = CountryBreakdown.Build(tradeResults, dividends);
+
         return new TaxSummary(
             TotalProceedsPln: Math.Round(totalProceedsPln, 2),
             TotalCostPln: Math.Round(totalCostPln, 2),
@@ -58,6 +60,7 @@ public class TaxCalculator : ITaxCalculator
             TaxableTo: taxPeriod.TaxableTo,
             TradeResults: tradeResults,
             Dividends: dividends,
-            Warnings: warnings);
+            Warnings: warnings,
+            Countries: countries);
     }
 }

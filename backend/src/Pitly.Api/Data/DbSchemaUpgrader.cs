@@ -13,6 +13,9 @@ public static class DbSchemaUpgrader
         TryExecute(db, "ALTER TABLE Sessions ADD COLUMN PriorYearLossesJson TEXT NULL;");
         TryExecute(db, "ALTER TABLE Sessions ADD COLUMN WarningsJson TEXT NULL;");
         TryExecute(db, "ALTER TABLE TradeResults ADD COLUMN Note TEXT NULL;");
+        TryExecute(db, "ALTER TABLE TradeResults ADD COLUMN Isin TEXT NULL;");
+        TryExecute(db, "ALTER TABLE Dividends ADD COLUMN Isin TEXT NULL;");
+        TryExecute(db, "ALTER TABLE Sessions ADD COLUMN CountriesJson TEXT NULL;");
         TryExecute(db, "ALTER TABLE Dividends ADD COLUMN Kind TEXT NOT NULL DEFAULT 'Dividend';");
         TryExecute(db, "ALTER TABLE Dividends ADD COLUMN CreditableWithholdingPln TEXT NOT NULL DEFAULT '0.0';");
         TryExecute(db, "ALTER TABLE Dividends ADD COLUMN MaxCreditableRate TEXT NULL;");

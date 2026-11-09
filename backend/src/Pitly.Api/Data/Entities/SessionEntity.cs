@@ -20,6 +20,8 @@ public class SessionEntity
     public string? PriorYearLossesJson { get; set; }
     // Parser warnings shown on the dashboard (JSON array of strings)
     public string? WarningsJson { get; set; }
+    // Income by country for PIT/ZG (JSON array of CountryIncome)
+    public string? CountriesJson { get; set; }
 
     public List<TradeResultEntity> TradeResults { get; set; } = [];
     public List<DividendEntity> Dividends { get; set; } = [];

@@ -154,6 +154,8 @@ export default function Pit38Page({ state }: { state: AppState }) {
         </p>
       )}
 
+      <PitZgSection pit38={pit38} />
+
       <EpityGuide pit38={pit38} year={year} hasDividends={pit38.totalDividendsPln > 0} />
     </div>
   );
@@ -512,5 +514,101 @@ function PriorYearLossBreakdown({ pit38 }: { pit38: Pit38Fields }) {
         </div>
       )}
     </div>
+  );
+}
+
+// PIT/ZG annex: art. 30b income per issuer country, computed on the backend (CountryBreakdown).
+function PitZgSection({ pit38 }: { pit38: Pit38Fields }) {
+  const rows = pit38.pitZg;
+  if (rows.length === 0) return null;
+  const capitalRows = rows.filter(r => r.saleCount > 0);
+  const dividendRows = rows.filter(r => r.dividendCount > 0);
+  const th = 'text-slate-400 text-xs uppercase tracking-wider font-medium px-4 py-3';
+  const td = 'px-4 py-2.5 font-mono tabular-nums text-right';
+
+  return (
+    <Section title="PIT/ZG — dochody zagraniczne wedlug kraju (zalacznik do PIT-38)">
+      {capitalRows.length > 0 ? (
+        <>
+          <div className="px-6 pt-4 pb-2 text-slate-400 text-sm">
+            One PIT/ZG per country. In section C.3 (art. 30b) enter the <span className="text-slate-200">dochod</span> and
+            the tax paid abroad on those sales. A country whose result is a loss is listed for reference only: losses are
+            not entered in PIT/ZG, they already reduce the total in PIT-38 section C.
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700">
+                <th className={`${th} text-left`}>Kraj (panstwo)</th>
+                <th className={`${th} text-right`}>Sales</th>
+                <th className={`${th} text-right`}>Przychod</th>
+                <th className={`${th} text-right`}>Koszty</th>
+                <th className={`${th} text-right`}>Dochod (PIT/ZG)</th>
+                <th className={`${th} text-right`}>Strata</th>
+                <th className={`${th} text-right`}>Podatek zaplacony za granica</th>
+              </tr>
+            </thead>
+            <tbody>
+              {capitalRows.map((r) => (
+                <tr key={r.countryCode} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                  <td className="px-4 py-2.5 text-slate-200">
+                    {r.countryName}
+                    <span className="ml-2 text-xs font-mono text-slate-500">{r.countryCode}</span>
+                  </td>
+                  <td className={`${td} text-slate-400`}>{r.saleCount}</td>
+                  <td className={`${td} text-slate-300`}>{formatPln(r.proceedsPln)}</td>
+                  <td className={`${td} text-slate-300`}>{formatPln(r.costPln)}</td>
+                  <td className={`${td} ${r.incomePln > 0 ? 'text-white font-medium' : 'text-slate-500'}`}>{formatPln(r.incomePln)}</td>
+                  <td className={`${td} ${r.lossPln > 0 ? 'text-red-400' : 'text-slate-500'}`}>{formatPln(r.lossPln)}</td>
+                  <td className={`${td} text-slate-300`}>{formatPln(r.taxPaidAbroadPln)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : (
+        <div className="px-6 py-4 text-slate-400 text-sm">
+          No sales in the taxable period, so no PIT/ZG rows for art. 30b income are needed.
+        </div>
+      )}
+
+      {dividendRows.length > 0 && (
+        <div className="border-t border-slate-700/50">
+          <div className="px-6 pt-4 pb-2 text-slate-500 text-xs">
+            Dividends, interest and payments in lieu by country (reference only: for PIT-38 they are not entered in PIT/ZG;
+            the creditable withholding goes straight to poz. 48).
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700/50">
+                <th className={`${th} text-left`}>Kraj</th>
+                <th className={`${th} text-right`}>Payments</th>
+                <th className={`${th} text-right`}>Gross (PLN)</th>
+                <th className={`${th} text-right`}>Withheld (PLN)</th>
+                <th className={`${th} text-right`}>Creditable (PLN)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dividendRows.map((r) => (
+                <tr key={r.countryCode} className="border-b border-slate-700/50">
+                  <td className="px-4 py-2 text-slate-300">
+                    {r.countryName}
+                    <span className="ml-2 text-xs font-mono text-slate-500">{r.countryCode}</span>
+                  </td>
+                  <td className={`${td} text-slate-400`}>{r.dividendCount}</td>
+                  <td className={`${td} text-slate-300`}>{formatPln(r.dividendsPln)}</td>
+                  <td className={`${td} text-slate-300`}>{formatPln(r.withholdingPln)}</td>
+                  <td className={`${td} text-amber-300`}>{formatPln(r.creditableWithholdingPln)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="px-6 py-3 text-slate-500 text-xs">
+        Country = issuer country from the ISIN prefix. Many advisers attribute income to the country of the exchange
+        instead; for US-listed shares both give the United States. Ireland-domiciled ETFs (IE) are reported under Ireland.
+      </div>
+    </Section>
   );
 }

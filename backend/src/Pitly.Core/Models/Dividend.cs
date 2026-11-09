@@ -15,4 +15,6 @@ public record Dividend(
     // Treaty cap applied (e.g. 0.15 for US), or null when the statutory 19% cap was used.
     decimal? MaxCreditableRate,
     decimal ExchangeRate,
-    bool RateUnavailable = false);
+    bool RateUnavailable = false,
+    // Issuer ISIN, used to attribute the income to a country for PIT/ZG
+    string? Isin = null);
