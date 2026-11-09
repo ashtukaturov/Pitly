@@ -395,12 +395,17 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             .ToList();
     }
 
+    /// <summary>
+    /// IB books withholding as a negative cash amount and a later correction as a positive reversal (often in the next
+    /// year's statement, dated back to the dividend). The sign is kept so that corrections net against the original
+    /// when several statements are combined: positive = tax withheld, negative = tax refunded.
+    /// </summary>
     private static List<RawWithholdingTax> NetWithholdingTaxes(List<RawWithholdingTax> taxes)
     {
         return taxes
             .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date, t.Kind))
-            .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, Math.Abs(g.Sum(t => t.Amount)), g.Key.Isin, g.Key.Kind))
-            .Where(t => t.Amount > 0)
+            .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, -g.Sum(t => t.Amount), g.Key.Isin, g.Key.Kind))
+            .Where(t => t.Amount != 0)
             .ToList();
     }
 

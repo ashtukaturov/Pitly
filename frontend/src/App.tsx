@@ -36,6 +36,20 @@ export default function App() {
   const [switchingYear, setSwitchingYear] = useState(false);
   const [yearError, setYearError] = useState<string | null>(null);
 
+  const handleStartOver = () => {
+    setState({
+      sessionId: null,
+      summary: null,
+      pit38: null,
+      trades: [],
+      dividends: [],
+      files: [],
+      availableYears: [],
+      priorYearLosses: [],
+    });
+    setYearError(null);
+  };
+
   const handleImportComplete = (data: AppState) => {
     setState(data);
     setYearError(null);
@@ -72,7 +86,10 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/app" element={<AppLayout year={state.summary?.year ?? null} />}>
-        <Route index element={<ImportPage onComplete={handleImportComplete} />} />
+        <Route
+          index
+          element={<ImportPage onComplete={handleImportComplete} existingFiles={state.files} onStartOver={handleStartOver} />}
+        />
         <Route
           path="dashboard"
           element={<DashboardPage state={state} onRecalculate={handleRecalculate} switchingYear={switchingYear} yearError={yearError} />}

@@ -143,4 +143,31 @@ public class DividendTaxCalculatorTests
         Assert.Equal(10m, bermuda.CreditableWithholdingPln);
         Assert.Null(bermuda.MaxCreditableRate);
     }
+
+    [Fact]
+    public async Task CalculateAsync_NetsNegativeWithholdingCorrectionsAgainstTheOriginal()
+    {
+        var rateService = new TestRateService(new Dictionary<string, decimal> { ["USD"] = 4m });
+        var calculator = new DividendTaxCalculator(rateService);
+        var date = new DateTime(2025, 2, 5);
+
+        var dividends = new List<RawDividend> { new("BND", "USD", date, 44.61m, "US9219378356") };
+        var taxes = new List<RawWithholdingTax>
+        {
+            new("BND", "USD", date, 6.69m, "US9219378356"),   // withheld, from the 2025 statement
+            new("BND", "USD", date, -6.16m, "US9219378356")   // reversal and re-charge, from the 2026 statement
+        };
+
+        var result = Assert.Single(await calculator.CalculateAsync(dividends, taxes));
+
+        Assert.Equal(0.53m, result.WithholdingTaxOriginal);
+        Assert.Equal(2.12m, result.WithholdingTaxPln);
+        Assert.Equal(2.12m, result.CreditableWithholdingPln);
+
+        // A correction larger than the original cannot produce a negative credit.
+        var refunded = Assert.Single(await calculator.CalculateAsync(
+            dividends,
+            [new("BND", "USD", date, 6.69m, "US9219378356"), new("BND", "USD", date, -6.69m, "US9219378356")]));
+        Assert.Equal(0m, refunded.WithholdingTaxPln);
+    }
 }

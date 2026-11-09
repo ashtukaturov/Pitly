@@ -29,7 +29,8 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                 .Where(t => IsMatch(div, t))
                 .ToList();
 
-            var withholdingAmount = matchingTaxes.Sum(t => t.Amount);
+            // Corrections carry a negative amount and net against the original; a net refund leaves nothing to credit.
+            var withholdingAmount = Math.Max(matchingTaxes.Sum(t => t.Amount), 0m);
             var withholdingCurrencies = matchingTaxes
                 .Select(t => t.Currency)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -54,6 +55,7 @@ public class DividendTaxCalculator : IDividendTaxCalculator
 
                 withholdingPln += tax.Amount * withholdingRate;
             }
+            withholdingPln = Math.Max(withholdingPln, 0m);
 
             // Art. 30a ust. 9: the foreign tax credit cannot exceed 19% of the dividend. On top of that,
             // only tax withheld in line with the applicable treaty is creditable: the excess (e.g. 30% US

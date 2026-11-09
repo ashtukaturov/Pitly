@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Pitly.Api.Data;
 using Pitly.Api.Mapping;
 using Pitly.Core.Models;
@@ -26,17 +28,32 @@ public class ImportService : IImportService
         IReadOnlyList<Stream> fileStreams,
         DateTime? residencyStartDate = null,
         IReadOnlyList<PriorYearLoss>? priorYearLosses = null,
-        int? taxYear = null)
+        int? taxYear = null,
+        IReadOnlyList<string>? fileNames = null)
     {
         if (fileStreams.Count == 0)
             throw new FormatException("No files uploaded.");
 
         var statements = new List<ParsedStatement>();
+        var names = new List<string>();
+        var importWarnings = new List<string>();
+        var seenContent = new Dictionary<string, string>(StringComparer.Ordinal);
 
         for (var i = 0; i < fileStreams.Count; i++)
         {
             using var reader = new StreamReader(fileStreams[i], leaveOpen: true);
             var content = await reader.ReadToEndAsync();
+            var name = fileNames is not null && i < fileNames.Count && !string.IsNullOrWhiteSpace(fileNames[i]) ? fileNames[i] : "file " + (i + 1);
+
+            // The same file selected twice (or re-uploaded after an error) is skipped before parsing.
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+            if (seenContent.TryGetValue(hash, out var firstName))
+            {
+                importWarnings.Add("'" + name + "' is identical to '" + firstName + "' and was skipped.");
+                continue;
+            }
+            seenContent[hash] = name;
+            names.Add(name);
 
             _logger.LogInformation("Parsing statement {Index}/{Count} ({Length} chars)", i + 1, fileStreams.Count, content.Length);
             var parsed = _parser.Parse(content);
@@ -53,7 +70,10 @@ public class ImportService : IImportService
 
         var availableYears = statements.Select(GetStatementYear).Distinct().OrderBy(y => y).ToList();
         var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate, taxYear);
-        var merged = MergeStatements(statements, taxPeriod.Year);
+        var merged = StatementMerger.Merge(
+            statements.Zip(names, (statement, name) => new StatementMerger.NamedStatement(name, statement)).ToList(),
+            taxPeriod.Year,
+            importWarnings);
 
         if (merged.Trades.Count == 0 && merged.Dividends.Count == 0 && merged.WithholdingTaxes.Count == 0 &&
             (merged.CorporateActions?.Count ?? 0) == 0)
@@ -158,19 +178,4 @@ public class ImportService : IImportService
         return years.Max();
     }
 
-    private static ParsedStatement MergeStatements(IReadOnlyList<ParsedStatement> statements, int targetYear)
-    {
-        return new ParsedStatement(
-            Trades: statements.SelectMany(s => s.Trades).OrderBy(t => t.DateTime).ToList(),
-            Dividends: statements.SelectMany(s => s.Dividends).OrderBy(d => d.Date).ToList(),
-            WithholdingTaxes: statements.SelectMany(s => s.WithholdingTaxes).OrderBy(t => t.Date).ToList(),
-            // Overlapping exports repeat the same corporate action; apply each event once.
-            CorporateActions: statements.SelectMany(s => s.CorporateActions ?? [])
-                .DistinctBy(a => (a.DateTime, a.Type, a.Symbol, a.Isin, a.SourceSymbol, a.SourceIsin, a.Numerator, a.Denominator, a.Quantity, a.CashProceeds))
-                .OrderBy(a => a.DateTime)
-                .ToList(),
-            CarryInPositions: statements.SelectMany(s => s.CarryInPositions ?? []).ToList(),
-            StatementYear: targetYear,
-            Warnings: statements.SelectMany(s => s.Warnings ?? []).Distinct().ToList());
-    }
 }

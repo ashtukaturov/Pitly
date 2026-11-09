@@ -69,7 +69,7 @@ public static class ImportEndpoints
                 var streams = files.Select(file => file.OpenReadStream()).ToList();
                 try
                 {
-                    var result = await importService.ImportStatementsAsync(streams, residencyStartDate, priorYearLosses, taxYear);
+                    var result = await importService.ImportStatementsAsync(streams, residencyStartDate, priorYearLosses, taxYear, files.Select(f => f.FileName).ToList());
                     // Single source of truth for the form values: computed here with decimal arithmetic
                     // instead of being re-derived on the frontend with floating point.
                     var pit38 = Pit38Fields.FromSummary(result.Summary);

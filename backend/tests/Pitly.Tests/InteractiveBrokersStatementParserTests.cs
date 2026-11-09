@@ -239,4 +239,27 @@ public class InteractiveBrokersStatementParserTests
 
         Assert.Contains("does not appear to be an IB Activity Statement", ex.Message);
     }
+
+    [Fact]
+    public void Parse_KeepsSignOfWithholdingCorrectionsDatedInEarlierYear()
+    {
+        // The next-year statement reverses last year's withholding (+6.69) and re-charges a smaller amount (-0.53).
+        var csv = """
+                  Statement,Header,Field Name,Field Value
+                  Statement,Data,Period,"January 1, 2026 - November 6, 2026"
+                  Dividends,Header,Currency,Date,Description,Amount
+                  Dividends,Data,USD,2026-03-05,"BND(US9219378356) Cash Dividend USD 0.23 per Share (Unqualified Dividend)",44.00
+                  Withholding Tax,Header,Currency,Date,Description,Amount
+                  Withholding Tax,Data,USD,2025-02-05,"BND(US9219378356) Cash Dividend USD 0.234799 per Share - US Tax",6.69
+                  Withholding Tax,Data,USD,2025-02-05,"BND(US9219378356) Cash Dividend USD 0.234799 per Share - US Tax",-0.53
+                  Withholding Tax,Data,USD,2026-03-05,"BND(US9219378356) Cash Dividend USD 0.23 per Share - US Tax",-6.60
+                  """;
+
+        var parsed = Parser.Parse(csv);
+
+        var correction = Assert.Single(parsed.WithholdingTaxes, t => t.Date == new DateTime(2025, 2, 5));
+        Assert.Equal(-6.16m, correction.Amount);
+        var current = Assert.Single(parsed.WithholdingTaxes, t => t.Date == new DateTime(2026, 3, 5));
+        Assert.Equal(6.60m, current.Amount);
+    }
 }

@@ -34,7 +34,16 @@ function HelpSection({ title, children }: { title: string; children: React.React
   );
 }
 
-export default function ImportPage({ onComplete }: { onComplete: (data: AppState) => void }) {
+export default function ImportPage({
+  onComplete,
+  existingFiles = [],
+  onStartOver,
+}: {
+  onComplete: (data: AppState) => void;
+  // Files from the previous import; new uploads are added to them so statements can arrive in several batches
+  existingFiles?: File[];
+  onStartOver?: () => void;
+}) {
   const [step, setStep] = useState<Step>('idle');
   const [error, setError] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -56,6 +65,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
 
     // Merge with previously queued files (from a failed attempt), newer file wins on name collision
     const merged = new Map<string, File>();
+    for (const f of existingFiles) merged.set(f.name, f);
     for (const f of pendingFiles) merged.set(f.name, f);
     for (const f of files) merged.set(f.name, f);
     const allFiles = Array.from(merged.values());
@@ -100,7 +110,7 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
       setStep('error');
       setError(err instanceof Error ? err.message : 'Import failed');
     }
-  }, [onComplete, pendingFiles, residencyStartDate, priorYearLosses]);
+  }, [onComplete, pendingFiles, existingFiles, residencyStartDate, priorYearLosses]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -125,6 +135,30 @@ export default function ImportPage({ onComplete }: { onComplete: (data: AppState
 
       {!isProcessing ? (
         <>
+          {existingFiles.length > 0 && (
+            <div className="mb-6 bg-slate-800 border border-blue-500/40 rounded-xl p-5 text-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className="text-slate-200 font-medium">Already loaded: {existingFiles.length} {existingFiles.length === 1 ? 'file' : 'files'}</span>
+                  <span className="block text-slate-500 mt-1">
+                    {existingFiles.map(f => f.name).join(', ')}
+                  </span>
+                  <span className="block text-slate-500 mt-1">
+                    Drop more statements below to add them; files and rows that are already present are skipped automatically.
+                  </span>
+                </div>
+                {onStartOver && (
+                  <button
+                    type="button"
+                    onClick={onStartOver}
+                    className="shrink-0 text-slate-400 hover:text-red-400 transition-colors text-sm"
+                  >
+                    Start over
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <div className="mb-6 bg-slate-800 border border-slate-700 rounded-xl p-5">
             <label className="block">
               <span className="text-slate-200 font-medium">Polish tax residency start date</span>
