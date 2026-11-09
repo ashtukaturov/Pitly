@@ -43,6 +43,7 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var hasTrades = false;
         var hasDividends = false;
         var hasWithholding = false;
+        var hasAccountInfo = false;
         int? statementYear = null;
 
         foreach (var rawLine in lines)
@@ -59,6 +60,9 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             {
                 case "Statement":
                     TryParseStatementYear(fields, ref statementYear);
+                    break;
+                case "Account Information":
+                    hasAccountInfo = true;
                     break;
                 case "Trades":
                     hasTrades = true;
@@ -95,9 +99,20 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         }
 
         if (!hasTrades && !hasDividends && !hasWithholding && grantRows.Count == 0 &&
-            interestRows.Count == 0 && paymentInLieuRows.Count == 0)
-            throw new FormatException(
-                "File does not appear to be an IB Activity Statement. Please export in CSV format.");
+            interestRows.Count == 0 && paymentInLieuRows.Count == 0 && corporateActionRows.Count == 0)
+        {
+            if (statementYear is null && !hasAccountInfo)
+                throw new FormatException(
+                    "File does not appear to be an IB Activity Statement. Please export in CSV format.");
+
+            // A genuine Activity Statement with only cash movements (deposits, withdrawals, FX). There is nothing
+            // to declare from it, but it must not break an upload that combines several years.
+            var yearLabel = statementYear?.ToString() ?? "This";
+            warnings.Add(
+                $"{yearLabel} statement contains no trades, dividends, interest or corporate actions (only cash movements such as deposits). " +
+                "There is nothing to declare from it.");
+            return new ParsedStatement([], [], [], [], [], statementYear, warnings);
+        }
 
         foreach (var fields in tradeRows)
             TryParseTrade(fields, trades, symbolToIsin);

@@ -209,4 +209,34 @@ public class InteractiveBrokersStatementParserTests
         Assert.Equal(0.2105m, third.Quantity);
         Assert.Equal(71.27m, third.Price);
     }
+
+    [Fact]
+    public void Parse_CashOnlyStatementIsAcceptedAsEmptyWithWarning()
+    {
+        var csv = """
+                  Statement,Header,Field Name,Field Value
+                  Statement,Data,Title,Activity Statement
+                  Statement,Data,Period,"January 1, 2020 - December 31, 2020"
+                  Account Information,Header,Field Name,Field Value
+                  Account Information,Data,Account Type,Individual
+                  Deposits & Withdrawals,Header,Currency,Settle Date,Description,Amount
+                  Deposits & Withdrawals,Data,USD,2020-12-07,Electronic Fund Transfer,30000
+                  Deposits & Withdrawals,Data,Total,,,30000
+                  """;
+
+        var parsed = Parser.Parse(csv);
+
+        Assert.Empty(parsed.Trades);
+        Assert.Empty(parsed.Dividends);
+        Assert.Equal(2020, parsed.StatementYear);
+        Assert.Contains(parsed.Warnings!, w => w.Contains("2020") && w.Contains("nothing to declare"));
+    }
+
+    [Fact]
+    public void Parse_RejectsFilesThatAreNotIbStatements()
+    {
+        var ex = Assert.Throws<FormatException>(() => Parser.Parse("Foo,Bar\n1,2\n"));
+
+        Assert.Contains("does not appear to be an IB Activity Statement", ex.Message);
+    }
 }

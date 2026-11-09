@@ -52,6 +52,16 @@ public class ImportService : IImportService
         var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate);
         var merged = MergeStatements(statements, taxPeriod.Year);
 
+        if (merged.Trades.Count == 0 && merged.Dividends.Count == 0 && merged.WithholdingTaxes.Count == 0 &&
+            (merged.CorporateActions?.Count ?? 0) == 0)
+        {
+            var years = string.Join(", ", statements.Select(s => s.StatementYear).Where(y => y is not null).Distinct().OrderBy(y => y));
+            throw new FormatException(
+                $"The uploaded statement{(statements.Count > 1 ? "s" : string.Empty)} ({years}) contain{(statements.Count > 1 ? string.Empty : "s")} only cash movements such as deposits or withdrawals: " +
+                "no trades, dividends or interest, so there is nothing to declare for that period. " +
+                "Upload the year(s) in which you sold shares or received dividends; earlier years can be added alongside for FIFO history.");
+        }
+
         var summary = await _calculator.CalculateAsync(merged, taxPeriod) with
         {
             PriorYearLosses = priorYearLosses ?? []
