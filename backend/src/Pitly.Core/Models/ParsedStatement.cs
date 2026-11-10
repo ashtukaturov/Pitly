@@ -9,8 +9,11 @@ public record ParsedStatement(
     int? StatementYear = null,
     // Things the user should review: corporate actions handled with a conservative assumption, rows ignored, etc.
     List<string>? Warnings = null,
-    // Broker account the statement belongs to (IB "Account Information"); duplicates are only removed within one account
-    string? AccountId = null);
+    // Broker account the statement belongs to (IB "Account Information"). Null when the export carries no account
+    // number (Trading 212): that does not prove two such files belong to one account, so the user can label them.
+    string? AccountId = null,
+    // Broker name for messages and for telling apart statements without an account number
+    string? Broker = null);
 
 /// <summary>
 /// Kind of flat-tax (art. 30a) income. All kinds are taxed at 19% and reported in the same PIT-38 field,
@@ -36,7 +39,15 @@ public record RawDividend(
     DateTime Date,
     decimal Amount,
     string? Isin = null,
-    IncomeKind Kind = IncomeKind.Dividend);
+    IncomeKind Kind = IncomeKind.Dividend,
+    // Account the payment belongs to; stamped by StatementMerger so matching and FIFO never cross accounts
+    string? AccountId = null,
+    // Broker's own id of the operation (Trading 212 "ID"), used to recognise the same row in overlapping exports
+    string? TransactionId = null,
+    // Tax withheld on this very payment when the broker reports it in the same row (Trading 212). The link is
+    // kept instead of re-matching by date, so two payments of one day cannot swap or share their withholding.
+    decimal? WithheldAmount = null,
+    string? WithheldCurrency = null);
 
 public record RawWithholdingTax(
     string Symbol,
@@ -44,7 +55,8 @@ public record RawWithholdingTax(
     DateTime Date,
     decimal Amount,
     string? Isin = null,
-    IncomeKind Kind = IncomeKind.Dividend);
+    IncomeKind Kind = IncomeKind.Dividend,
+    string? AccountId = null);
 
 public enum CorporateActionType
 {
@@ -90,7 +102,9 @@ public record CorporateAction(
     // Cash received (CashMerger, CashInLieu, cash part of a StockMerger) in Currency
     decimal CashProceeds = 0m,
     string? Currency = null,
-    string? Description = null)
+    string? Description = null,
+    // Account whose position the action changes; stamped by StatementMerger
+    string? AccountId = null)
 {
     public decimal Factor => Denominator == 0 ? 0 : Numerator / Denominator;
     public string EffectiveSourceSymbol => string.IsNullOrWhiteSpace(SourceSymbol) ? Symbol : SourceSymbol;
@@ -101,4 +115,5 @@ public record CarryInPosition(
     string Symbol,
     decimal Quantity,
     int Year,
-    string? Isin = null);
+    string? Isin = null,
+    string? AccountId = null);

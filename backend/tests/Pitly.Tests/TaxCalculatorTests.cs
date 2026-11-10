@@ -203,9 +203,9 @@ public class TaxCalculatorTests
         Assert.Equal(4m, summary.DividendTaxOwedPln);
 
         var pit38 = Pit38Fields.FromSummary(summary);
-        Assert.Equal(19m, pit38.Poz47ZryczaltowanyPodatek);
-        Assert.Equal(15m, pit38.Poz48PodatekZaplaconyZaGranica);
-        Assert.Equal(4m, pit38.Poz49Roznica);
+        Assert.Equal(19m, pit38.ZryczaltowanyPodatek);
+        Assert.Equal(15m, pit38.PodatekZaplaconyZaGranica);
+        Assert.Equal(4m, pit38.Roznica);
     }
 
     [Fact]
@@ -215,18 +215,18 @@ public class TaxCalculatorTests
 
         var pit38 = Pit38Fields.FromSummary(summary);
 
-        Assert.Equal(600m, pit38.Poz26Dochod);
-        Assert.Equal(200m, pit38.Poz30StratyZLatUbieglych);
-        Assert.Equal(400m, pit38.Poz31PodstawaObliczenia);
-        Assert.Equal(76m, pit38.Poz33Podatek);
-        Assert.Equal(76m, pit38.Poz35PodatekNalezny);
+        Assert.Equal(600m, pit38.Dochod);
+        Assert.Equal(200m, pit38.StratyZLatUbieglych);
+        Assert.Equal(400m, pit38.PodstawaObliczenia);
+        Assert.Equal(76m, pit38.Podatek);
+        Assert.Equal(76m, pit38.PodatekNalezny);
         Assert.Equal(0m, pit38.DaninaSolidarnosciowaPln);
 
         // A loss larger than this year's income is capped: the base cannot go negative.
         var capped = Pit38Fields.FromSummary(BuildSummary(proceeds: 1000m, cost: 400m, priorYearLoss: 5000m));
-        Assert.Equal(600m, capped.Poz30StratyZLatUbieglych);
-        Assert.Equal(0m, capped.Poz31PodstawaObliczenia);
-        Assert.Equal(0m, capped.Poz51PodatekDoZaplaty);
+        Assert.Equal(600m, capped.StratyZLatUbieglych);
+        Assert.Equal(0m, capped.PodstawaObliczenia);
+        Assert.Equal(0m, capped.PodatekDoZaplaty);
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public class TaxCalculatorTests
         var pit38 = Pit38Fields.FromSummary(summary);
 
         // 1 600 000 income - 100 000 loss = 1 500 000 base; excess over 1 000 000 = 500 000; 4% = 20 000
-        Assert.Equal(1_500_000m, pit38.Poz31PodstawaObliczenia);
+        Assert.Equal(1_500_000m, pit38.PodstawaObliczenia);
         Assert.Equal(500_000m, pit38.DaninaSolidarnosciowaNadwyzka);
         Assert.Equal(20_000m, pit38.DaninaSolidarnosciowaPln);
     }

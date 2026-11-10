@@ -34,31 +34,85 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         public Dictionary<string, string> KeySymbols { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<string>? Warnings { get; init; }
         public bool OpeningPositionsChecked { get; set; }
+        // Text such as " on account U111" appended to messages when the upload spans several accounts
+        public string AccountSuffix { get; init; } = string.Empty;
     }
 
     private const decimal PositionTolerance = 0.001m;
 
+    /// <summary>Start of every opening-position warning; such warnings are repeated on PIT-38 and in the printout.</summary>
+    public const string PositionCheckPrefix = "Position check for ";
+
+    /// <summary>
+    /// Every broker account has its own FIFO queues: a purchase on one account can never be the cost of a sale on
+    /// another, and a split or rename reported by both statements changes each position exactly once. The accounts
+    /// are calculated one after another and their results are combined afterwards.
+    /// </summary>
     public async Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null)
+    {
+        var carryIns = statement.CarryInPositions ?? [];
+        var actions = statement.CorporateActions ?? [];
+        var accounts = statement.Trades.Select(t => AccountKey(t.AccountId))
+            .Concat(actions.Select(a => AccountKey(a.AccountId)))
+            .Concat(carryIns.Select(p => AccountKey(p.AccountId)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(a => a, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (accounts.Count <= 1)
+            return await CalculateAccountAsync(statement.Trades, actions, carryIns, taxPeriod, warnings, accountSuffix: string.Empty);
+
+        var results = new List<TradeResult>();
+        foreach (var account in accounts)
+        {
+            results.AddRange(await CalculateAccountAsync(
+                statement.Trades.Where(t => SameAccount(t.AccountId, account)).ToList(),
+                actions.Where(a => SameAccount(a.AccountId, account)).ToList(),
+                carryIns.Where(p => SameAccount(p.AccountId, account)).ToList(),
+                taxPeriod,
+                warnings,
+                accountSuffix: account.Length == 0 ? " on the account without a number" : " on account " + account));
+        }
+
+        // Stable sort: rows of one account keep their timeline order.
+        return results.OrderBy(r => r.DateTime).ToList();
+    }
+
+    private static string AccountKey(string? accountId) => accountId?.Trim() ?? string.Empty;
+
+    private static bool SameAccount(string? accountId, string account)
+        => string.Equals(AccountKey(accountId), account, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<List<TradeResult>> CalculateAccountAsync(
+        IReadOnlyList<Trade> trades,
+        IReadOnlyList<CorporateAction> actions,
+        IReadOnlyList<CarryInPosition> carryIns,
+        TaxPeriod taxPeriod,
+        List<string>? warnings,
+        string accountSuffix)
     {
         var ctx = new Context
         {
             TaxPeriod = taxPeriod,
             Warnings = warnings,
-            CarryInByKey = (statement.CarryInPositions ?? [])
+            AccountSuffix = accountSuffix,
+            CarryInByKey = carryIns
                 .Where(p => p.Year == taxPeriod.Year)
                 .GroupBy(GetLotKey, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.Sum(p => p.Quantity), StringComparer.OrdinalIgnoreCase)
         };
 
-        var events = statement.Trades
+        // Earlier years are replayed to rebuild the FIFO lots. Anything after the end of the selected period cannot
+        // change its result, so it is not replayed: a later sale with incomplete history must not block this year.
+        var events = trades
             .Select(trade => new TimelineEvent(trade.DateTime, trade, null))
-            .Concat((statement.CorporateActions ?? [])
-                .Select(action => new TimelineEvent(action.DateTime, null, action)))
+            .Concat(actions.Select(action => new TimelineEvent(action.DateTime, null, action)))
+            .Where(e => e.DateTime.Date <= taxPeriod.TaxableTo)
             .OrderBy(e => e.DateTime)
             .ThenBy(e => e.Trade is null ? 0 : 1)
             .ToList();
 
-        foreach (var position in (statement.CarryInPositions ?? []).Where(p => p.Year == taxPeriod.Year))
+        foreach (var position in carryIns.Where(p => p.Year == taxPeriod.Year))
             ctx.KeySymbols.TryAdd(GetLotKey(position), position.Symbol);
 
         var yearStart = new DateTime(taxPeriod.Year, 1, 1);
@@ -130,7 +184,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         var remainingQty = trade.Quantity;
 
         if (lots.Count == 0)
-            throw new InvalidOperationException(BuildMissingLotsMessage(trade, ctx.TaxPeriod.Year, ctx.CarryInByKey));
+            throw new InvalidOperationException(BuildMissingLotsMessage(trade, ctx.TaxPeriod.Year, ctx.CarryInByKey, ctx.AccountSuffix));
 
         while (remainingQty > 0 && lots.Count > 0)
         {
@@ -151,7 +205,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 trade,
                 trade.Quantity - remainingQty,
                 ctx.TaxPeriod.Year,
-                ctx.CarryInByKey));
+                ctx.CarryInByKey,
+                ctx.AccountSuffix));
 
         var totalCostWithSellCommissionPln = totalCostPln + sellCommissionPln;
         var gainLoss = proceedsPln - totalCostWithSellCommissionPln;
@@ -351,8 +406,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
 
             var symbol = ctx.KeySymbols.TryGetValue(resolved, out var s) ? s : key;
             ctx.Warnings.Add(string.Format(CultureInfo.InvariantCulture,
-                "Position check for {0}: {1} shares of {2} were reconstructed from the uploaded trades, but the statement reports {3} shares at the start of {0}. A statement for a year with trades or a stock split is probably missing, or a corporate action was not recognised; the cost basis of {2} sales may be wrong.",
-                year, Fmt(have), symbol, Fmt(priorQuantity)));
+                PositionCheckPrefix + "{0}: {1} shares of {2} were reconstructed from the uploaded trades{4}, but the statement reports {3} shares at the start of {0}. A statement for a year with trades or a stock split is probably missing, or a corporate action was not recognised; the cost basis of {2} sales may be wrong.",
+                year, Fmt(have), symbol, Fmt(priorQuantity), ctx.AccountSuffix));
         }
 
         foreach (var (key, have) in reconstructed.OrderBy(kv => kv.Key))
@@ -362,8 +417,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
 
             var symbol = ctx.KeySymbols.TryGetValue(key, out var s) ? s : key;
             ctx.Warnings.Add(string.Format(CultureInfo.InvariantCulture,
-                "Position check for {0}: {1} shares of {2} were reconstructed from earlier statements, but the {0} statement shows no such position at the start of the year. A sale or corporate action in a missing year may have closed it.",
-                year, Fmt(have), symbol));
+                PositionCheckPrefix + "{0}: {1} shares of {2} were reconstructed from earlier statements{3}, but the {0} statement shows no such position at the start of the year. A sale or corporate action in a missing year may have closed it.",
+                year, Fmt(have), symbol, ctx.AccountSuffix));
         }
     }
 
@@ -449,18 +504,19 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
     private static string BuildMissingLotsMessage(
         Trade trade,
         int targetYear,
-        IReadOnlyDictionary<string, decimal> carryInByKey)
+        IReadOnlyDictionary<string, decimal> carryInByKey,
+        string accountSuffix)
     {
         if (carryInByKey.TryGetValue(GetLotKey(trade), out var carryInQuantity) && carryInQuantity > 0)
         {
             return
-                $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}: " +
+                $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}{accountSuffix}: " +
                 $"this sale depends on {carryInQuantity} shares carried into {targetYear} from earlier statements. " +
                 "Upload prior-year CSVs so Pitly can reconstruct the original FIFO buy lots.";
         }
 
         return
-            $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}: no buy lots available. " +
+            $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}{accountSuffix}: no buy lots available. " +
             "Upload earlier statements so Pitly can reconstruct the original FIFO buy lots.";
     }
 
@@ -468,18 +524,19 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         Trade trade,
         decimal availableQuantity,
         int targetYear,
-        IReadOnlyDictionary<string, decimal> carryInByKey)
+        IReadOnlyDictionary<string, decimal> carryInByKey,
+        string accountSuffix)
     {
         if (carryInByKey.TryGetValue(GetLotKey(trade), out var carryInQuantity) && carryInQuantity > 0)
         {
             return
-                $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}: " +
+                $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}{accountSuffix}: " +
                 $"only {availableQuantity} shares were reconstructed from uploaded statements, and this position carried {carryInQuantity} shares into {targetYear}. " +
                 "Upload prior-year CSVs so Pitly can reconstruct the missing FIFO buy lots.";
         }
 
         return
-            $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}: " +
+            $"Cannot sell {trade.Quantity} shares of {trade.Symbol} on {trade.DateTime:yyyy-MM-dd}{accountSuffix}: " +
             $"only {availableQuantity} shares available in buy lots. " +
             "Upload earlier statements so Pitly can reconstruct the missing FIFO buy lots.";
     }

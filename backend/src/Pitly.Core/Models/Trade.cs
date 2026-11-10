@@ -11,7 +11,11 @@ public record Trade(
     string CommissionCurrency,
     decimal RealizedPnL,
     TradeType Type,
-    string? Isin = null);
+    string? Isin = null,
+    // Account whose FIFO queue the trade belongs to; stamped by StatementMerger
+    string? AccountId = null,
+    // Broker's own id of the trade (Trading 212 "ID"), used to recognise the same row in overlapping exports
+    string? TransactionId = null);
 
 public enum TradeType { Buy, Sell }
 

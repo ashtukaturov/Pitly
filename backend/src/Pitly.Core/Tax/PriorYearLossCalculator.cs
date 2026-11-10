@@ -117,12 +117,12 @@ public static class PriorYearLossCalculator
             warnings.Add($"Only losses from tax years {firstEligibleYear}-{lastEligibleYear} can be deducted in {taxYear}; losses outside this window were ignored.");
 
         if (totalEligible > 0m && income <= 0m)
-            warnings.Add($"No capital-gains income in {taxYear} (poz. 26 = 0), so prior-year losses cannot be deducted this year. They keep carrying forward within their 5-year windows.");
+            warnings.Add($"No capital-gains income in {taxYear} (the \"Dochód\" field is 0), so prior-year losses cannot be deducted this year. They keep carrying forward within their 5-year windows.");
         else if (totalEligible > income)
-            warnings.Add($"Deductible losses ({Fmt(totalEligible)}) exceed this year's income ({Fmt(income)}); only {Fmt(totalApplied)} is entered in poz. 30. The deduction cannot create or increase a loss.");
+            warnings.Add($"Deductible losses ({Fmt(totalEligible)}) exceed this year's income ({Fmt(income)}); only {Fmt(totalApplied)} is entered as \"Straty z lat ubiegłych\". The deduction cannot create or increase a loss.");
 
         if (lines.Any(l => l.AppliedPln > 0m))
-            warnings.Add("Only losses from the same source count: capital gains under art. 30b reported in PIT-38 of the loss year. Losses cannot reduce the flat tax on dividends and interest (art. 30a, poz. 47).");
+            warnings.Add("Only losses from the same source count: capital gains under art. 30b reported in PIT-38 of the loss year. Losses cannot reduce the flat tax on dividends and interest (art. 30a).");
 
         return new PriorYearLossResult(lines, totalApplied, warnings);
     }

@@ -24,6 +24,12 @@ public class SessionEntity
     public string? CountriesJson { get; set; }
     public decimal TotalInterestPln { get; set; }
     public decimal TotalInterestCreditableWithholdingPln { get; set; }
+    // Warnings that put the result itself in doubt (JSON array of strings); null for sessions saved before it existed
+    public string? ResultWarningsJson { get; set; }
+    // Version of the stored data, see DbSchemaUpgrader.CurrentDataVersion
+    public int DataVersion { get; set; }
+    // Saved by an older version without the data needed to rebuild the aggregates exactly
+    public bool NeedsReimport { get; set; }
 
     public List<TradeResultEntity> TradeResults { get; set; } = [];
     public List<DividendEntity> Dividends { get; set; } = [];

@@ -20,14 +20,14 @@ public class StatementMergerTests
             WithholdingTaxes: [],
             CorporateActions: [new CorporateAction("AAPL", new DateTime(2026, 6, 1), CorporateActionType.StockSplit, 4m, 1m, "US0378331005")],
             CarryInPositions: [new CarryInPosition("AAPL", 10m, 2026, "US0378331005")],
-            StatementYear: 2026);
+            StatementYear: 2026, AccountId: "U1234567");
         var partial = new ParsedStatement(
             Trades: [Buy("AAPL", new DateTime(2026, 2, 3, 10, 0, 0), 5m, 100m)],
             Dividends: [Dividend(new DateTime(2026, 2, 15), 2.4m)],
             WithholdingTaxes: [],
             CorporateActions: [new CorporateAction("AAPL", new DateTime(2026, 6, 1), CorporateActionType.StockSplit, 4m, 1m, "US0378331005")],
             CarryInPositions: [new CarryInPosition("AAPL", 10m, 2026, "US0378331005")],
-            StatementYear: 2026);
+            StatementYear: 2026, AccountId: "U1234567");
 
         var warnings = new List<string>();
         var merged = StatementMerger.Merge(
@@ -54,7 +54,7 @@ public class StatementMergerTests
             Trades: [Buy("AAPL", when, 1m, 100m), Buy("AAPL", when, 1m, 100m)],
             Dividends: [],
             WithholdingTaxes: [],
-            StatementYear: 2026);
+            StatementYear: 2026, AccountId: "U1234567");
 
         var warnings = new List<string>();
         var merged = StatementMerger.Merge([new StatementMerger.NamedStatement("a.csv", statement)], 2026, warnings);
@@ -70,12 +70,12 @@ public class StatementMergerTests
             Trades: [Buy("AAPL", new DateTime(2025, 2, 3, 10, 0, 0), 5m, 100m)],
             Dividends: [],
             WithholdingTaxes: [],
-            StatementYear: 2025);
+            StatementYear: 2025, AccountId: "U1234567");
         var second = new ParsedStatement(
             Trades: [Buy("AAPL", new DateTime(2025, 2, 3, 10, 0, 0), 5m, 100m), Buy("MSFT", new DateTime(2025, 2, 4, 10, 0, 0), 1m, 400m)],
             Dividends: [],
             WithholdingTaxes: [],
-            StatementYear: 2025);
+            StatementYear: 2025, AccountId: "U1234567");
 
         var warnings = new List<string>();
         var merged = StatementMerger.Merge(

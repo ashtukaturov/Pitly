@@ -22,4 +22,7 @@ public record TaxSummary(
     IReadOnlyList<CountryIncome>? Countries = null,
     // Interest part of TotalDividendsPln (art. 30a ust. 1 pkt 1-3), rounded to grosz up instead of full PLN
     decimal TotalInterestPln = 0m,
-    decimal TotalInterestCreditableWithholdingPln = 0m);
+    decimal TotalInterestCreditableWithholdingPln = 0m,
+    // Subset of Warnings that puts the result itself in doubt (opening positions that do not match the uploaded
+    // history, withholding that could not be attributed). Repeated on PIT-38 and in the printed report.
+    IReadOnlyList<string>? ResultWarnings = null);

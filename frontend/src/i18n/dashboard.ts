@@ -31,6 +31,17 @@ export const dashboard: Translations = {
     'dashboard.card.taxOwed': 'Tax Owed (PL)',
     'dashboard.card.dueBy': 'Due by April 30, {year}',
 
+    'dashboard.card.capitalGainsSubLoss': 'Tax: {tax} after deducting {loss} of prior-year losses',
+    'dashboard.card.taxOwedSub': 'As in PIT-38 · due by April 30, {year}',
+    'dashboard.accounts.title': 'Statements without an account number',
+    'dashboard.accounts.intro':
+      'These files do not say which account they belong to. Files of one account share their FIFO history and repeated rows are removed; files of different accounts are kept apart. Choose the account of each file and recalculate.',
+    'dashboard.accounts.assumed': 'Not confirmed yet: treated as one account.',
+    'dashboard.accounts.confirmed': 'Confirmed.',
+    'dashboard.accounts.option': 'Account {n}',
+    'dashboard.accounts.fileAria': 'Account of {name}',
+    'dashboard.accounts.apply': 'Apply and recalculate',
+
     'dashboard.chart.monthly': 'Monthly Proceeds vs Costs',
     'dashboard.chart.proceeds': 'Proceeds',
     'dashboard.chart.costs': 'Costs',
@@ -71,6 +82,17 @@ export const dashboard: Translations = {
     'dashboard.card.taxOwed': 'Податок до сплати (PL)',
     'dashboard.card.dueBy': 'Сплатити до 30 квітня {year} р.',
 
+    'dashboard.card.capitalGainsSubLoss': 'Податок: {tax} після відрахування {loss} збитків минулих років',
+    'dashboard.card.taxOwedSub': 'Як у PIT-38 · сплатити до 30 квітня {year} р.',
+    'dashboard.accounts.title': 'Виписки без номера рахунку',
+    'dashboard.accounts.intro':
+      'У цих файлах не вказано, якому рахунку вони належать. Файли одного рахунку мають спільну історію FIFO, а повторювані рядки вилучаються; файли різних рахунків рахуються окремо. Оберіть рахунок для кожного файла та перерахуйте.',
+    'dashboard.accounts.assumed': 'Ще не підтверджено: враховано як один рахунок.',
+    'dashboard.accounts.confirmed': 'Підтверджено.',
+    'dashboard.accounts.option': 'Рахунок {n}',
+    'dashboard.accounts.fileAria': 'Рахунок для {name}',
+    'dashboard.accounts.apply': 'Застосувати й перерахувати',
+
     'dashboard.chart.monthly': 'Виручка та витрати за місяцями',
     'dashboard.chart.proceeds': 'Виручка',
     'dashboard.chart.costs': 'Витрати',
@@ -110,6 +132,17 @@ export const dashboard: Translations = {
     'dashboard.card.withholdingCredited': 'Podatek u źródła odliczony',
     'dashboard.card.taxOwed': 'Podatek do zapłaty (PL)',
     'dashboard.card.dueBy': 'Termin: 30 kwietnia {year}',
+
+    'dashboard.card.capitalGainsSubLoss': 'Podatek: {tax} po odliczeniu {loss} strat z lat ubiegłych',
+    'dashboard.card.taxOwedSub': 'Jak w PIT-38 · termin: 30 kwietnia {year}',
+    'dashboard.accounts.title': 'Zestawienia bez numeru rachunku',
+    'dashboard.accounts.intro':
+      'Te pliki nie wskazują, do którego rachunku należą. Pliki jednego rachunku mają wspólną historię FIFO, a powtórzone wiersze są usuwane; pliki różnych rachunków są liczone osobno. Wybierz rachunek dla każdego pliku i przelicz ponownie.',
+    'dashboard.accounts.assumed': 'Jeszcze niepotwierdzone: potraktowano jako jeden rachunek.',
+    'dashboard.accounts.confirmed': 'Potwierdzone.',
+    'dashboard.accounts.option': 'Rachunek {n}',
+    'dashboard.accounts.fileAria': 'Rachunek dla {name}',
+    'dashboard.accounts.apply': 'Zastosuj i przelicz',
 
     'dashboard.chart.monthly': 'Przychód i koszty miesięcznie',
     'dashboard.chart.proceeds': 'Przychód',

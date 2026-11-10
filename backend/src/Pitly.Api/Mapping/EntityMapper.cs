@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Pitly.Api.Data;
 using Pitly.Core.Models;
+using Pitly.Core.Tax;
 
 namespace Pitly.Api.Mapping;
 
@@ -21,12 +23,15 @@ public static class EntityMapper
             TotalWithholdingPln = summary.TotalWithholdingPln,
             TotalCreditableWithholdingPln = summary.TotalCreditableWithholdingPln,
             DividendTaxOwedPln = summary.DividendTaxOwedPln,
-            PriorYearLossPln = Pit38Fields.FromSummary(summary).Poz30StratyZLatUbieglych,
+            PriorYearLossPln = Pit38Fields.FromSummary(summary).StratyZLatUbieglych,
             PriorYearLossesJson = PriorYearLossJson.Serialize(summary.PriorYearLosses),
-            WarningsJson = summary.Warnings is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(summary.Warnings) : null,
-            CountriesJson = summary.Countries is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(summary.Countries) : null,
+            WarningsJson = summary.Warnings is { Count: > 0 } ? JsonSerializer.Serialize(summary.Warnings) : null,
+            ResultWarningsJson = JsonSerializer.Serialize(summary.ResultWarnings ?? []),
+            CountriesJson = summary.Countries is { Count: > 0 } ? JsonSerializer.Serialize(summary.Countries) : null,
             TotalInterestPln = summary.TotalInterestPln,
             TotalInterestCreditableWithholdingPln = summary.TotalInterestCreditableWithholdingPln,
+            DataVersion = DbSchemaUpgrader.CurrentDataVersion,
+            NeedsReimport = false,
             TradeResults = summary.TradeResults.Select(t => new TradeResultEntity
             {
                 Symbol = t.Symbol,
@@ -70,24 +75,59 @@ public static class EntityMapper
         return new TaxPeriod(session.Year, taxableFrom, new DateTime(session.Year, 12, 31));
     }
 
-    public static object ToSummaryResponse(SessionEntity session)
+    /// <summary>The stored session as a summary without its rows: everything PIT-38 is computed from.</summary>
+    public static TaxSummary ToSummary(SessionEntity session)
     {
         var taxPeriod = ToTaxPeriod(session);
+        var warnings = DeserializeWarnings(session.WarningsJson);
+        return new TaxSummary(
+            session.TotalProceedsPln, session.TotalCostPln,
+            session.CapitalGainPln, session.CapitalGainTaxPln,
+            session.TotalDividendsPln, session.TotalWithholdingPln,
+            session.TotalCreditableWithholdingPln,
+            session.DividendTaxOwedPln, session.Year,
+            taxPeriod.TaxableFrom, taxPeriod.TaxableTo,
+            [], [],
+            PriorYearLossJson.Deserialize(session.PriorYearLossesJson),
+            Warnings: warnings,
+            Countries: DeserializeCountries(session.CountriesJson),
+            TotalInterestPln: session.TotalInterestPln,
+            TotalInterestCreditableWithholdingPln: session.TotalInterestCreditableWithholdingPln,
+            // Sessions saved before result warnings were stored separately: the opening-position check is
+            // recognised by its fixed prefix.
+            ResultWarnings: session.ResultWarningsJson is null
+                ? warnings.Where(w => w.StartsWith(CapitalGainsTaxCalculator.PositionCheckPrefix, StringComparison.Ordinal)).ToList()
+                : DeserializeWarnings(session.ResultWarningsJson));
+    }
+
+    /// <summary>PIT-38 of a stored session: the same calculation as right after the import.</summary>
+    public static Pit38Fields ToPit38(SessionEntity session)
+        => Pit38Fields.FromSummary(ToSummary(session)) with { NeedsReimport = session.NeedsReimport };
+
+    public static object ToSummaryResponse(SessionEntity session) => ToSummaryResponse(ToSummary(session), ToPit38(session));
+
+    /// <summary>
+    /// Summary as sent to the client. The tax amounts are taken from PIT-38 so that no screen can show a figure
+    /// computed before the loss deduction or with different rounding.
+    /// </summary>
+    public static object ToSummaryResponse(TaxSummary summary, Pit38Fields pit38)
+    {
         return new
         {
-            session.TotalProceedsPln,
-            session.TotalCostPln,
-            session.CapitalGainPln,
-            session.CapitalGainTaxPln,
-            session.TotalDividendsPln,
-            session.TotalWithholdingPln,
-            session.TotalCreditableWithholdingPln,
-            session.DividendTaxOwedPln,
-            session.Year,
-            taxPeriod.TaxableFrom,
-            taxPeriod.TaxableTo,
-            session.PriorYearLossPln,
-            Warnings = DeserializeWarnings(session.WarningsJson)
+            summary.TotalProceedsPln,
+            summary.TotalCostPln,
+            summary.CapitalGainPln,
+            CapitalGainTaxPln = pit38.PodatekNalezny,
+            summary.TotalDividendsPln,
+            summary.TotalWithholdingPln,
+            summary.TotalCreditableWithholdingPln,
+            DividendTaxOwedPln = pit38.Roznica,
+            summary.Year,
+            summary.TaxableFrom,
+            summary.TaxableTo,
+            PriorYearLossPln = pit38.StratyZLatUbieglych,
+            Warnings = summary.Warnings ?? [],
+            pit38.NeedsReimport
         };
     }
 
@@ -97,9 +137,9 @@ public static class EntityMapper
             return [];
         try
         {
-            return System.Text.Json.JsonSerializer.Deserialize<List<CountryIncome>>(json) ?? [];
+            return JsonSerializer.Deserialize<List<CountryIncome>>(json) ?? [];
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return [];
         }
@@ -111,9 +151,9 @@ public static class EntityMapper
             return [];
         try
         {
-            return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? [];
+            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return [];
         }

@@ -27,6 +27,8 @@ public partial class Trading212StatementParser : IStatementParser
         "charge amount"
     ];
 
+    public const string BrokerName = "Trading 212";
+
     private readonly ILogger<Trading212StatementParser> _logger;
 
     public Trading212StatementParser(ILogger<Trading212StatementParser> logger)
@@ -121,7 +123,10 @@ public partial class Trading212StatementParser : IStatementParser
             withholdingTaxes,
             CorporateActions: BuildStockSplits(splitRows, warnings),
             StatementYear: DetermineStatementYear(trades, dividends, withholdingTaxes),
-            Warnings: warnings);
+            Warnings: warnings,
+            // The export has no account number: whether two files are one account is the user's call.
+            AccountId: null,
+            Broker: BrokerName);
     }
 
     private record HeaderColumn(int Index, string RawName, string? CurrencyCode);
@@ -198,7 +203,8 @@ public partial class Trading212StatementParser : IStatementParser
             CommissionCurrency: fee.Currency,
             RealizedPnL: 0m,
             Type: tradeType,
-            Isin: row.Isin);
+            Isin: row.Isin,
+            TransactionId: GetField(fields, columnMap, "id"));
     }
 
     private void ParseDividend(
@@ -220,13 +226,6 @@ public partial class Trading212StatementParser : IStatementParser
         var row = ParseCommonFields(fields, columnMap, "dividend", lineNumber);
         var grossAmount = row.Shares * row.PricePerShare;
 
-        dividends.Add(new RawDividend(
-            Symbol: row.Ticker,
-            Currency: row.Currency,
-            Date: row.DateTime.Date,
-            Amount: grossAmount,
-            Isin: row.Isin));
-
         var withholding = TryParseMoneyAmount(
             fields,
             columnMap,
@@ -234,15 +233,18 @@ public partial class Trading212StatementParser : IStatementParser
             row.Currency,
             lineNumber);
 
-        if (withholding is not null)
-        {
-            withholdingTaxes.Add(new RawWithholdingTax(
-                Symbol: row.Ticker,
-                Currency: withholding.Currency,
-                Date: row.DateTime.Date,
-                Amount: withholding.Amount,
-                Isin: row.Isin));
-        }
+        // Trading 212 reports the tax withheld in the dividend's own row. The pair stays together: matching it
+        // again by instrument and day would let two payments of one day share or swap their withholding.
+        _ = withholdingTaxes;
+        dividends.Add(new RawDividend(
+            Symbol: row.Ticker,
+            Currency: row.Currency,
+            Date: row.DateTime.Date,
+            Amount: grossAmount,
+            Isin: row.Isin,
+            TransactionId: GetField(fields, columnMap, "id"),
+            WithheldAmount: withholding?.Amount,
+            WithheldCurrency: withholding?.Currency));
     }
 
     private void ParseInterest(
@@ -285,7 +287,8 @@ public partial class Trading212StatementParser : IStatementParser
             Date: dateTime.Date,
             Amount: total.Amount,
             Isin: null,
-            Kind: IncomeKind.Interest));
+            Kind: IncomeKind.Interest,
+            TransactionId: GetField(fields, columnMap, "id")));
     }
 
     private MoneyAmount ParseTradeFees(

@@ -22,14 +22,25 @@ public class TaxCalculator : ITaxCalculator
 
     public async Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod)
     {
-        var warnings = new List<string>(statement.Warnings ?? []);
-        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, warnings);
+        // The two calculators run concurrently, so each gets its own list. What they report puts the result itself
+        // in doubt (history that does not add up, withholding that could not be attributed) and is therefore kept
+        // apart from the informational statement warnings: it is repeated on PIT-38 and in the printed report.
+        var capitalGainWarnings = new List<string>();
+        var dividendWarnings = new List<string>();
+        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, capitalGainWarnings);
         var dividendsTask = _dividendTaxCalculator.CalculateAsync(
             statement.Dividends.Where(d => taxPeriod.IncludesDate(d.Date)).ToList(),
-            statement.WithholdingTaxes.Where(t => taxPeriod.IncludesDate(t.Date)).ToList());
+            statement.WithholdingTaxes.Where(t => taxPeriod.IncludesDate(t.Date)).ToList(),
+            dividendWarnings);
         await Task.WhenAll(tradeResultsTask, dividendsTask);
         var tradeResults = tradeResultsTask.Result;
         var dividends = dividendsTask.Result;
+
+        var resultWarnings = capitalGainWarnings.Concat(dividendWarnings)
+            .Concat((statement.Warnings ?? []).Where(w => w.StartsWith(Parsing.StatementMerger.AccountCheckPrefix, StringComparison.Ordinal)))
+            .Distinct()
+            .ToList();
+        var warnings = (statement.Warnings ?? []).Concat(resultWarnings).Distinct().ToList();
 
         var sellResults = tradeResults.Where(t => t.Type == TradeType.Sell).ToList();
         var totalProceedsPln = sellResults.Sum(t => t.ProceedsPln);
@@ -64,6 +75,7 @@ public class TaxCalculator : ITaxCalculator
             Warnings: warnings,
             Countries: countries,
             TotalInterestPln: Math.Round(interest.Sum(d => d.AmountPln), 2),
-            TotalInterestCreditableWithholdingPln: Math.Round(interest.Sum(d => d.CreditableWithholdingPln), 2));
+            TotalInterestCreditableWithholdingPln: Math.Round(interest.Sum(d => d.CreditableWithholdingPln), 2),
+            ResultWarnings: resultWarnings);
     }
 }

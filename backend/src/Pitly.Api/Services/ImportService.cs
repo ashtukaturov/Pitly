@@ -29,13 +29,13 @@ public class ImportService : IImportService
         DateTime? residencyStartDate = null,
         IReadOnlyList<PriorYearLoss>? priorYearLosses = null,
         int? taxYear = null,
-        IReadOnlyList<string>? fileNames = null)
+        IReadOnlyList<string>? fileNames = null,
+        IReadOnlyDictionary<string, string>? accountLabels = null)
     {
         if (fileStreams.Count == 0)
             throw new FormatException("No files uploaded.");
 
-        var statements = new List<ParsedStatement>();
-        var names = new List<string>();
+        var files = new List<StatementMerger.NamedStatement>();
         var importWarnings = new List<string>();
         var seenContent = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -53,11 +53,12 @@ public class ImportService : IImportService
                 continue;
             }
             seenContent[hash] = name;
-            names.Add(name);
 
             _logger.LogInformation("Parsing statement {Index}/{Count} ({Length} chars)", i + 1, fileStreams.Count, content.Length);
             var parsed = _parser.Parse(content);
-            statements.Add(parsed);
+            string? label = null;
+            accountLabels?.TryGetValue(name, out label);
+            files.Add(new StatementMerger.NamedStatement(name, parsed, label));
             _logger.LogInformation(
                 "Parsed statement {Index}/{Count}: {Trades} trades, {Dividends} dividends, {Taxes} withholding taxes, {Actions} corporate actions",
                 i + 1,
@@ -68,74 +69,98 @@ public class ImportService : IImportService
                 parsed.CorporateActions?.Count ?? 0);
         }
 
+        var statements = files.Select(f => f.Statement).ToList();
+        // Collected from every row of every file, so a year can be offered even if the latest one cannot be calculated.
         var availableYears = statements.SelectMany(GetCoveredYears).Distinct().OrderBy(y => y).ToList();
-        var taxPeriod = DetermineTaxPeriod(statements, residencyStartDate, taxYear);
-        var merged = StatementMerger.Merge(
-            statements.Zip(names, (statement, name) => new StatementMerger.NamedStatement(name, statement)).ToList(),
-            taxPeriod.Year,
-            importWarnings);
+        int? attemptedYear = taxYear;
 
-        if (merged.Trades.Count == 0 && merged.Dividends.Count == 0 && merged.WithholdingTaxes.Count == 0 &&
-            (merged.CorporateActions?.Count ?? 0) == 0)
+        try
         {
-            var years = string.Join(", ", statements.Select(s => s.StatementYear).Where(y => y is not null).Distinct().OrderBy(y => y));
-            throw new FormatException(
-                $"The uploaded statement{(statements.Count > 1 ? "s" : string.Empty)} ({years}) contain{(statements.Count > 1 ? string.Empty : "s")} only cash movements such as deposits or withdrawals: " +
-                "no trades, dividends or interest, so there is nothing to declare for that period. " +
-                "Upload the year(s) in which you sold shares or received dividends; earlier years can be added alongside for FIFO history.");
+            var taxPeriod = DetermineTaxPeriod(statements, availableYears, residencyStartDate, taxYear);
+            attemptedYear = taxPeriod.Year;
+            var merged = StatementMerger.Merge(files, taxPeriod.Year, importWarnings);
+
+            if (merged.Trades.Count == 0 && merged.Dividends.Count == 0 && merged.WithholdingTaxes.Count == 0 &&
+                (merged.CorporateActions?.Count ?? 0) == 0)
+            {
+                var years = string.Join(", ", statements.Select(s => s.StatementYear).Where(y => y is not null).Distinct().OrderBy(y => y));
+                throw new FormatException(
+                    $"The uploaded statement{(statements.Count > 1 ? "s" : string.Empty)} ({years}) contain{(statements.Count > 1 ? string.Empty : "s")} only cash movements such as deposits or withdrawals: " +
+                    "no trades, dividends or interest, so there is nothing to declare for that period. " +
+                    "Upload the year(s) in which you sold shares or received dividends; earlier years can be added alongside for FIFO history.");
+            }
+
+            var calculated = await _calculator.CalculateAsync(merged, taxPeriod) with
+            {
+                PriorYearLosses = priorYearLosses ?? []
+            };
+
+            // PIT-38 is the single source of the tax amounts: the summary carries its figures (after the loss
+            // deduction and the form's rounding), never a second calculation of its own.
+            var pit38 = Pit38Fields.FromSummary(calculated);
+            var summary = calculated with
+            {
+                CapitalGainTaxPln = pit38.PodatekNalezny,
+                DividendTaxOwedPln = pit38.Roznica
+            };
+
+            _logger.LogInformation(
+                "Tax calculation complete for year {Year} from {TaxableFrom}: capital gain {Gain} PLN, tax to pay {Tax} PLN",
+                summary.Year,
+                summary.TaxableFrom.ToString("yyyy-MM-dd"),
+                summary.CapitalGainPln,
+                pit38.PodatekDoZaplaty);
+
+            var session = EntityMapper.ToSessionEntity(summary);
+            _db.Sessions.Add(session);
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("Session {SessionId} saved", session.Id);
+            return new ImportResult(session.Id, summary, availableYears, files.Select(DescribeFile).ToList());
         }
-
-        var summary = await _calculator.CalculateAsync(merged, taxPeriod) with
+        catch (Exception ex) when (ex is FormatException or InvalidOperationException)
         {
-            PriorYearLosses = priorYearLosses ?? []
-        };
-        _logger.LogInformation(
-            "Tax calculation complete for year {Year} from {TaxableFrom}: capital gain {Gain} PLN, dividend tax owed {DivTax} PLN",
-            summary.Year,
-            summary.TaxableFrom.ToString("yyyy-MM-dd"),
-            summary.CapitalGainPln,
-            summary.DividendTaxOwedPln);
-
-        var session = EntityMapper.ToSessionEntity(summary);
-        _db.Sessions.Add(session);
-        await _db.SaveChangesAsync();
-
-        _logger.LogInformation("Session {SessionId} saved", session.Id);
-        return new ImportResult(session.Id, summary, availableYears);
+            throw new ImportFailedException(ex.Message, availableYears, attemptedYear, ex);
+        }
     }
 
-    private static int DetermineTargetYear(IReadOnlyList<ParsedStatement> statements)
+    private static ImportedFile DescribeFile(StatementMerger.NamedStatement file)
     {
-        var years = statements
-            .Select(GetStatementYear)
-            .ToList();
-
-        if (years.Count == 0)
-        {
-            throw new FormatException(
-                "The uploaded files contain no trades or dividends. Please check that the CSV export is valid.");
-        }
-
-        return years.Max();
+        var resolution = StatementMerger.ResolveAccount(file);
+        return new ImportedFile(
+            file.Name,
+            file.Statement.Broker,
+            resolution.FromUser ? file.AccountLabel!.Trim() : resolution.Account,
+            AccountKnown: resolution.FromStatement,
+            AccountConfirmed: resolution.FromStatement || resolution.FromUser);
     }
 
     private static TaxPeriod DetermineTaxPeriod(
         IReadOnlyList<ParsedStatement> statements,
+        IReadOnlyList<int> availableYears,
         DateTime? residencyStartDate,
         int? requestedYear)
     {
-        var targetYear = DetermineTargetYear(statements);
+        int targetYear;
         if (requestedYear is not null)
         {
-            var years = statements.SelectMany(GetCoveredYears).Distinct().OrderBy(y => y).ToList();
-            if (!years.Contains(requestedYear.Value))
+            if (!availableYears.Contains(requestedYear.Value))
             {
                 throw new FormatException(
-                    "Tax year " + requestedYear.Value + " is not covered by the uploaded statements (" + string.Join(", ", years) + "). " +
+                    "Tax year " + requestedYear.Value + " is not covered by the uploaded statements (" + string.Join(", ", availableYears) + "). " +
                     "Upload the statement for that year, or pick one of the listed years.");
             }
 
             targetYear = requestedYear.Value;
+        }
+        else
+        {
+            targetYear = statements.Select(GetStatementYear).DefaultIfEmpty(0).Max();
+            if (targetYear == 0)
+            {
+                throw new FormatException(
+                    "The uploaded files contain no trades or dividends. Please check that the CSV export is valid.");
+            }
         }
 
         if (residencyStartDate is null)
@@ -190,5 +215,4 @@ public class ImportService : IImportService
 
         return years.Max();
     }
-
 }

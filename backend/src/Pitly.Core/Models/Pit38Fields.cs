@@ -3,48 +3,48 @@ using Pitly.Core.Tax;
 namespace Pitly.Core.Models;
 
 /// <summary>
-/// Maps calculated tax values to actual PIT-38(18) form field positions (poz.).
-/// Field numbers match the official form published by the Polish Ministry of Finance.
+/// The amounts that go into PIT-38, named after the fields of the form rather than their numbers: the numbers
+/// differ between form versions and are supplied separately in <see cref="Form"/> for tax years whose version was
+/// verified (see <see cref="Pit38FormLayout"/>). This record is the single source of the amount to pay: the
+/// dashboard, the declaration page and the printout all show these values.
 /// </summary>
 public record Pit38Fields(
     int Year,
 
-    // ── Section C: Dochody / Straty — art. 30b ust. 1 ustawy ──
-    // Row 1 (poz. 20-21): Przychody wykazane w PIT-8C — always 0 for foreign brokers
-    // Row 2 (poz. 22-23): Inne przychody — this is where IB income goes
-    decimal Poz22Przychody,
-    decimal Poz23Koszty,
-    // Row 3 (poz. 24-25): Razem = sum of rows 1+2 (equal to 22-23 since row 1 is empty)
-    decimal Poz24RazemPrzychody,
-    decimal Poz25RazemKoszty,
-    // Poz. 26: Dochód (gain), only if proceeds > costs, otherwise 0
-    decimal Poz26Dochod,
-    // Poz. 27: Strata (loss as positive number), only if costs > proceeds, otherwise 0
-    decimal Poz27Strata,
+    // ── Section C: Dochody / straty — art. 30b ust. 1 ustawy ──
+    // Row "Inne przychody": where income from a foreign broker goes (no PIT-8C is issued)
+    decimal InnePrzychody,
+    decimal InneKoszty,
+    // Row "Razem": equal to "Inne przychody" because the PIT-8C and exempt-income rows stay empty
+    decimal RazemPrzychody,
+    decimal RazemKoszty,
+    // Dochód (gain), only if proceeds exceed costs, otherwise 0
+    decimal Dochod,
+    // Strata (loss as a positive number), only if costs exceed proceeds, otherwise 0
+    decimal Strata,
 
     // ── Section D: Obliczenie zobowiązania podatkowego — art. 30b ust. 1 ustawy ──
-    // Poz. 30: Straty z lat ubiegłych (cannot exceed the income it is deducted from)
-    decimal Poz30StratyZLatUbieglych,
-    // Poz. 31: Podstawa obliczenia podatku = dochód minus poz. 30 (rounded to full PLN per art. 63 § 1 O.p.)
-    decimal Poz31PodstawaObliczenia,
-    // Poz. 33: Podatek = poz. 31 × 19%
-    decimal Poz33Podatek,
-    // Poz. 35: Podatek należny (rounded to full PLN)
-    decimal Poz35PodatekNalezny,
+    // Straty z lat ubiegłych (cannot exceed the income it is deducted from)
+    decimal StratyZLatUbieglych,
+    // Podstawa obliczenia podatku = dochód minus straty, rounded to full PLN (art. 63 § 1 O.p.)
+    decimal PodstawaObliczenia,
+    // Podatek = podstawa × 19%
+    decimal Podatek,
+    // Podatek należny (rounded to full PLN)
+    decimal PodatekNalezny,
 
-    // ── Section G: Podatek do zapłaty / Nadpłata ──
-    // Poz. 47: Zryczałtowany podatek 19% od przychodów zagranicznych z art. 30a ust. 1 pkt 1-5
-    //          (dywidendy, odsetki, payments in lieu)
-    decimal Poz47ZryczaltowanyPodatek,
-    // Poz. 48: Podatek zapłacony za granicą (treaty-capped, and never above poz. 47, per art. 30a ust. 9)
-    decimal Poz48PodatekZaplaconyZaGranica,
-    // Poz. 49: Różnica = poz. 47 − poz. 48 (rounded per art. 63 § 1a O.p. — see footnote 8 on PIT-38(18))
-    decimal Poz49Roznica,
-    // Poz. 51: PODATEK DO ZAPŁATY = poz. 35 + poz. 49
-    decimal Poz51PodatekDoZaplaty,
+    // ── Section G: Podatek do zapłaty / nadpłata ──
+    // Zryczałtowany podatek od przychodów z art. 30a ust. 1 pkt 1-5 uzyskanych za granicą (zł, gr; not rounded to PLN)
+    decimal ZryczaltowanyPodatek,
+    // Podatek zapłacony za granicą, art. 30a ust. 9 (zł, gr; treaty-capped and never above the flat tax)
+    decimal PodatekZaplaconyZaGranica,
+    // Różnica: the only rounded field of the three (full PLN; grosz upward for interest, art. 63 § 1a O.p.)
+    decimal Roznica,
+    // PODATEK DO ZAPŁATY = podatek należny + różnica
+    decimal PodatekDoZaplaty,
 
     // ── Danina solidarnościowa (art. 30h) — separate DSF-1 declaration, not a PIT-38 field ──
-    // Excess of the art. 30b income base (poz. 31) over 1 000 000 PLN. Only income known to Pitly is
+    // Excess of the art. 30b income base over 1 000 000 PLN. Only income known to Pitly is
     // counted; employment, business and other qualifying incomes also count toward the threshold.
     decimal DaninaSolidarnosciowaNadwyzka,
     // 4% of the excess, rounded to full PLN
@@ -53,15 +53,22 @@ public record Pit38Fields(
     // ── Informational (not a PIT-38 field — shown for user reference) ──
     decimal TotalDividendsPln,
 
-    // Per-loss breakdown of poz. 30 and warnings about the deduction (art. 9 ust. 3)
+    // Per-loss breakdown of the deduction and warnings about it (art. 9 ust. 3)
     IReadOnlyList<PriorYearLossLine> PriorYearLosses,
     IReadOnlyList<string> Warnings,
 
     // PIT/ZG annex: art. 30b income per issuer country (dividend figures included for reference only)
     IReadOnlyList<CountryIncome> PitZg,
 
-    // Field numbers of the form version that applies to Year (PIT-38(17) up to 2024, PIT-38(18) from 2025)
-    Pit38FormLayout Form)
+    // Field numbers of the verified form version for Year; null when no version was verified for that year
+    Pit38FormLayout? Form,
+
+    // Warnings that put the amounts themselves in doubt (opening positions that do not match the uploaded
+    // history, withholding that could not be attributed); shown next to the result and printed with it
+    IReadOnlyList<string> DataWarnings,
+
+    // The session was saved by an older version without the data needed to rebuild these amounts exactly
+    bool NeedsReimport = false)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
@@ -82,25 +89,37 @@ public record Pit38Fields(
         var podatek = Math.Round(podstawa * TaxConstants.TaxRate, 2);
         var podatekNalezny = RoundToFullPln(podatek);
 
-        // Section G — Dividends, interest, payments in lieu
-        // Poz. 47/49 fall under art. 30a ust. 1 — per art. 63 § 1a Ordynacji podatkowej
-        // (footnote 8 on PIT-38(18)), amounts are rounded to full groszy upward, not full PLN.
-        // Art. 63 par. 1a O.p. (grosz rounding upward) covers only art. 30a ust. 1 pkt 1-3, i.e. interest. Dividends and
-        // payments in lieu (pkt 4) follow the general rule of par. 1: full PLN. The two streams are rounded separately
-        // and then added, which is how the single form field is meant to be filled (footnote 5 on the form).
+        // Section G — Dividends, interest, payments in lieu received abroad.
+        //
+        // Order of calculation per the form and the Ministry's brochure ("Broszura informacyjna do zeznania
+        // PIT-38 za 2025 rok", part G, https://www.podatki.gov.pl/media/g5ebnm2e/broszura-do-pit-38-za-2025-r.pdf;
+        // same wording for 2022-2024 with the earlier field numbers):
+        //   1. the flat tax is the income multiplied by 19% and is entered in zł, gr (no rounding prescribed);
+        //   2. the tax paid abroad is entered in zł, gr and may not exceed the flat tax;
+        //   3. only the difference is rounded: "Kwoty w poz. 46 i 49 podaje się po zaokrągleniu do pełnych
+        //      złotych" (below 50 groszy dropped, 50 and more rounded up), with the exception of art. 63 § 1a
+        //      O.p. for the flat tax under art. 30a ust. 1 pkt 1-3 (interest), which is rounded up to full groszy.
+        // So the dividend tax keeps its precision until the difference is taken; rounding it to full PLN before
+        // subtracting the foreign tax would overstate the difference (19.57 - 15.10 must give 4, not 20 - 15.10 = 5).
+        //
+        // The form has a single field for both streams and the Ministry gives no rule for a mix of interest and
+        // dividends. Each stream is therefore rounded by its own rule and the two results are added.
         var interestPln = Math.Max(summary.TotalInterestPln, 0m);
         var dividendPln = Math.Max(summary.TotalDividendsPln - interestPln, 0m);
         var interestCreditable = Math.Max(summary.TotalInterestCreditableWithholdingPln, 0m);
         var dividendCreditable = Math.Max(summary.TotalCreditableWithholdingPln - interestCreditable, 0m);
 
-        var dividendTax = RoundToFullPln(dividendPln * TaxConstants.TaxRate);
+        var dividendTax = dividendPln * TaxConstants.TaxRate;
         var interestTax = RoundToGroszUp(interestPln * TaxConstants.TaxRate);
-        var zryczaltowanyPodatek = dividendTax + interestTax;
-        // Only the treaty-capped (creditable) part of foreign withholding may be entered as tax paid abroad.
-        var dividendCredit = Math.Round(Math.Min(dividendCreditable, dividendTax), 2);
-        var interestCredit = Math.Round(Math.Min(interestCreditable, interestTax), 2);
-        var podatekZaGranica = dividendCredit + interestCredit;
-        var roznica = RoundToFullPln(Math.Max(dividendTax - dividendCredit, 0)) + RoundToGroszUp(Math.Max(interestTax - interestCredit, 0));
+        var zryczaltowanyPodatek = RoundToGrosz(dividendTax) + interestTax;
+
+        // Only the treaty-capped (creditable) part of foreign withholding may be entered as tax paid abroad,
+        // and never more than the Polish flat tax on the same stream (art. 30a ust. 9).
+        var dividendCredit = Math.Min(dividendCreditable, dividendTax);
+        var interestCredit = Math.Min(interestCreditable, interestTax);
+        var podatekZaGranica = Math.Min(RoundToGrosz(dividendCredit) + interestCredit, zryczaltowanyPodatek);
+
+        var roznica = RoundToFullPln(Math.Max(dividendTax - dividendCredit, 0m)) + RoundToGroszUp(Math.Max(interestTax - interestCredit, 0m));
 
         var podatekDoZaplaty = podatekNalezny + roznica;
 
@@ -111,27 +130,28 @@ public record Pit38Fields(
 
         return new Pit38Fields(
             Year: summary.Year,
-            Poz22Przychody: przychody,
-            Poz23Koszty: koszty,
-            Poz24RazemPrzychody: przychody,
-            Poz25RazemKoszty: koszty,
-            Poz26Dochod: dochod,
-            Poz27Strata: strata,
-            Poz30StratyZLatUbieglych: straty,
-            Poz31PodstawaObliczenia: podstawa,
-            Poz33Podatek: podatek,
-            Poz35PodatekNalezny: podatekNalezny,
-            Poz47ZryczaltowanyPodatek: zryczaltowanyPodatek,
-            Poz48PodatekZaplaconyZaGranica: podatekZaGranica,
-            Poz49Roznica: roznica,
-            Poz51PodatekDoZaplaty: podatekDoZaplaty,
+            InnePrzychody: przychody,
+            InneKoszty: koszty,
+            RazemPrzychody: przychody,
+            RazemKoszty: koszty,
+            Dochod: dochod,
+            Strata: strata,
+            StratyZLatUbieglych: straty,
+            PodstawaObliczenia: podstawa,
+            Podatek: podatek,
+            PodatekNalezny: podatekNalezny,
+            ZryczaltowanyPodatek: zryczaltowanyPodatek,
+            PodatekZaplaconyZaGranica: podatekZaGranica,
+            Roznica: roznica,
+            PodatekDoZaplaty: podatekDoZaplaty,
             DaninaSolidarnosciowaNadwyzka: daninaNadwyzka,
             DaninaSolidarnosciowaPln: danina,
             TotalDividendsPln: summary.TotalDividendsPln,
             PriorYearLosses: lossResult.Lines,
             Warnings: lossResult.Warnings,
             PitZg: summary.Countries ?? [],
-            Form: Pit38FormLayout.ForYear(summary.Year));
+            Form: Pit38FormLayout.ForYear(summary.Year),
+            DataWarnings: summary.ResultWarnings ?? []);
     }
 
     /// <summary>
@@ -141,10 +161,13 @@ public record Pit38Fields(
     private static decimal RoundToFullPln(decimal value)
         => Math.Round(value, 0, MidpointRounding.AwayFromZero);
 
+    /// <summary>Amount as entered in a "zł, gr" field that has no rounding rule of its own.</summary>
+    private static decimal RoundToGrosz(decimal value)
+        => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
     /// <summary>
-    /// Rounds to full groszy upward per art. 63 § 1a Ordynacji podatkowej:
-    /// for lump-sum tax under art. 30a ust. 1 pkt 1-3, any fractional grosz rounds up.
-    /// Referenced by footnote 8 on PIT-38(18) form for poz. 46 and 49.
+    /// Rounds to full groszy upward per art. 63 § 1a Ordynacji podatkowej: the flat tax under
+    /// art. 30a ust. 1 pkt 1-3 (interest) is rounded up to the grosz instead of to full PLN.
     /// </summary>
     private static decimal RoundToGroszUp(decimal value)
         => Math.Ceiling(value * 100m) / 100m;

@@ -14,7 +14,7 @@ export const dividends: Translations = {
     'dividends.info2Rate': '4%',
     'dividends.info2After': '. Anything withheld above the treaty rate is not creditable and must be reclaimed abroad.',
     'dividends.info3':
-      'Interest on cash balances and "payments in lieu of dividends" (received while your shares were lent out) are also taxed at 19% under art. 30a and go into the same PIT-38 field (poz. 47). The exact treatment of payments in lieu is not settled in Polish practice: Pitly treats them like dividends, so confirm with a tax advisor if the amounts are material.',
+      'Interest on cash balances and "payments in lieu of dividends" (received while your shares were lent out) are also taxed at 19% under art. 30a and go into the same PIT-38 field ({zrycz}). The exact treatment of payments in lieu is not settled in Polish practice: Pitly treats them like dividends, so confirm with a tax advisor if the amounts are material.',
     'dividends.cappedWarning':
       'Some dividends were withheld above the treaty rate (e.g. 30% US withholding without a W-8BEN). Only the treaty-rate part is credited in the "Creditable" column; the rest cannot be offset on PIT-38.',
     'dividends.kind.dividend': 'Dividend',
@@ -47,7 +47,7 @@ export const dividends: Translations = {
     'dividends.info2Rate': '4%',
     'dividends.info2After': '. Усе, що утримано понад ставку за угодою, не підлягає заліку й має бути повернуто за кордоном.',
     'dividends.info3':
-      'Відсотки на залишки готівки та «платежі замість дивідендів» (отримані, поки ваші акції були позичені) також оподатковуються за ставкою 19% згідно зі ст. 30a і потрапляють у те саме поле PIT-38 (poz. 47). Порядок оподаткування платежів замість дивідендів у польській практиці остаточно не врегульовано: Pitly трактує їх як дивіденди, тому за суттєвих сум проконсультуйтеся з податковим радником.',
+      'Відсотки на залишки готівки та «платежі замість дивідендів» (отримані, поки ваші акції були позичені) також оподатковуються за ставкою 19% згідно зі ст. 30a і потрапляють у те саме поле PIT-38 ({zrycz}). Порядок оподаткування платежів замість дивідендів у польській практиці остаточно не врегульовано: Pitly трактує їх як дивіденди, тому за суттєвих сум проконсультуйтеся з податковим радником.',
     'dividends.cappedWarning':
       'З деяких дивідендів податок утримано понад ставку за угодою (напр. 30% у США без форми W-8BEN). У колонці «До заліку» зараховано лише частину в межах ставки за угодою; решту не можна зарахувати в PIT-38.',
     'dividends.kind.dividend': 'Дивіденд',
@@ -80,7 +80,7 @@ export const dividends: Translations = {
     'dividends.info2Rate': '4%',
     'dividends.info2After': '. Wszystko, co pobrano powyżej stawki umownej, nie podlega odliczeniu i trzeba je odzyskać za granicą.',
     'dividends.info3':
-      'Odsetki od sald gotówkowych i „płatności zastępcze” (otrzymane, gdy Twoje akcje były pożyczone) są również opodatkowane stawką 19% na podstawie art. 30a i trafiają do tego samego pola PIT-38 (poz. 47). Sposób opodatkowania płatności zastępczych nie jest w polskiej praktyce jednoznacznie rozstrzygnięty: Pitly traktuje je jak dywidendy, więc przy istotnych kwotach skonsultuj się z doradcą podatkowym.',
+      'Odsetki od sald gotówkowych i „płatności zastępcze” (otrzymane, gdy Twoje akcje były pożyczone) są również opodatkowane stawką 19% na podstawie art. 30a i trafiają do tego samego pola PIT-38 ({zrycz}). Sposób opodatkowania płatności zastępczych nie jest w polskiej praktyce jednoznacznie rozstrzygnięty: Pitly traktuje je jak dywidendy, więc przy istotnych kwotach skonsultuj się z doradcą podatkowym.',
     'dividends.cappedWarning':
       'Od części dywidend pobrano podatek powyżej stawki umownej (np. 30% w USA bez formularza W-8BEN). W kolumnie „Do odliczenia” zaliczono tylko część do wysokości stawki umownej; reszty nie można odliczyć w PIT-38.',
     'dividends.kind.dividend': 'Dywidenda',

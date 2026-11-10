@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { TrendingUp, Coins, Landmark, CreditCard, AlertTriangle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { formatPln, numColor, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
-import type { AppState } from '../types';
+import type { AppState, ImportedFile, RecalculateOptions } from '../types';
 import EmptyState from '../components/EmptyState';
 import { useT } from '../i18n';
 
@@ -13,12 +13,12 @@ export default function DashboardPage({
   yearError = null,
 }: {
   state: AppState;
-  onRecalculate?: (options: { year?: number; residencyStartDate?: string }) => void;
+  onRecalculate?: (options: RecalculateOptions) => void;
   switchingYear?: boolean;
   yearError?: string | null;
 }) {
   const t = useT();
-  const { summary, trades } = state;
+  const { summary, pit38, trades } = state;
   const [residencyDraft, setResidencyDraft] = useState(state.residencyStartDate ?? '');
   const residencyChanged = (residencyDraft || undefined) !== (state.residencyStartDate || undefined);
 
@@ -41,28 +41,35 @@ export default function DashboardPage({
       }));
   }, [trades]);
 
-  if (!state.sessionId || !summary) {
+  if (!state.sessionId || !summary || !pit38) {
     return <EmptyState />;
   }
 
-  const totalTaxOwed = summary.capitalGainTaxPln + summary.dividendTaxOwedPln;
+  // Every tax figure on this page is a PIT-38 field computed on the backend (after the loss deduction and with
+  // the form's rounding). Nothing is added up here from pre-deduction summary values.
+  const capitalGainsTax = pit38.podatekNalezny;
+  const flatTaxAfterCredit = pit38.roznica;
+  const totalTaxOwed = pit38.podatekDoZaplaty;
   const customTaxPeriod = hasCustomTaxPeriod(summary.year, summary.taxableFrom);
 
   const pieData = [
-    { name: t('dashboard.chart.capitalGainsTax'), value: Math.round(summary.capitalGainTaxPln * 100) / 100 },
-    { name: t('dashboard.chart.dividendTax'), value: Math.round(summary.dividendTaxOwedPln * 100) / 100 },
+    { name: t('dashboard.chart.capitalGainsTax'), value: capitalGainsTax },
+    { name: t('dashboard.chart.dividendTax'), value: flatTaxAfterCredit },
   ].filter(d => d.value > 0);
 
   const PIE_COLORS = ['#3b82f6', '#f59e0b'];
 
   const paymentCount = state.dividends.length;
   const warningCount = summary.warnings?.length ?? 0;
+  const filesWithoutAccount = state.importedFiles.filter(file => !file.accountKnown);
 
   const cards = [
     {
       label: t('dashboard.card.capitalGains'),
       value: summary.capitalGainPln,
-      sub: t('dashboard.card.capitalGainsSub', { tax: formatPln(summary.capitalGainTaxPln) }),
+      sub: pit38.stratyZLatUbieglych > 0
+        ? t('dashboard.card.capitalGainsSubLoss', { tax: formatPln(capitalGainsTax), loss: formatPln(pit38.stratyZLatUbieglych) })
+        : t('dashboard.card.capitalGainsSub', { tax: formatPln(capitalGainsTax) }),
       icon: TrendingUp,
       color: numColor(summary.capitalGainPln),
     },
@@ -77,8 +84,8 @@ export default function DashboardPage({
     },
     {
       label: t('dashboard.card.foreignTaxCredited'),
-      value: summary.totalCreditableWithholdingPln,
-      sub: summary.totalWithholdingPln > summary.totalCreditableWithholdingPln + 0.005
+      value: pit38.podatekZaplaconyZaGranica,
+      sub: summary.totalWithholdingPln > pit38.podatekZaplaconyZaGranica + 0.005
         ? t('dashboard.card.withheldCapped', { amount: formatPln(summary.totalWithholdingPln) })
         : t('dashboard.card.withholdingCredited'),
       icon: Landmark,
@@ -87,7 +94,7 @@ export default function DashboardPage({
     {
       label: t('dashboard.card.taxOwed'),
       value: totalTaxOwed,
-      sub: t('dashboard.card.dueBy', { year: summary.year + 1 }),
+      sub: t('dashboard.card.taxOwedSub', { year: summary.year + 1 }),
       icon: CreditCard,
       color: 'text-white',
       highlight: true,
@@ -141,7 +148,7 @@ export default function DashboardPage({
           {switchingYear && <span className="text-slate-500 text-sm">{t('dashboard.recalculating')}</span>}
         </div>
         {yearError && (
-          <p className="text-red-400 text-sm mt-2">{yearError}</p>
+          <p className="text-red-400 text-sm mt-2" role="alert">{yearError}</p>
         )}
         <p className="text-slate-400 text-sm mt-1">
           {t('dashboard.taxablePeriod', { period: formatTaxPeriod(summary.taxableFrom, summary.taxableTo) })}
@@ -158,6 +165,16 @@ export default function DashboardPage({
         )}
       </div>
 
+      {pit38.needsReimport && (
+        <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-5 text-sm text-red-200 flex gap-3" role="alert">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-300" />
+          <div>
+            <p className="font-semibold text-red-100">{t('pit38.reimport.title')}</p>
+            <p className="mt-1">{t('pit38.reimport.body')}</p>
+          </div>
+        </div>
+      )}
+
       {warningCount > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 text-sm text-amber-200">
           <p className="font-semibold text-amber-100 mb-2 flex items-center gap-2">
@@ -172,6 +189,17 @@ export default function DashboardPage({
             ))}
           </ul>
         </div>
+      )}
+
+      {onRecalculate && filesWithoutAccount.length > 1 && (
+        <AccountsSection
+          // Remount when the upload or the saved choice changes so the selects show the current assignment
+          key={filesWithoutAccount.map(f => `${f.name}=${state.accountLabels[f.name] ?? ''}`).join('|')}
+          files={filesWithoutAccount}
+          labels={state.accountLabels}
+          busy={switchingYear}
+          onApply={(accountLabels) => onRecalculate({ accountLabels })}
+        />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -244,6 +272,66 @@ export default function DashboardPage({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Files whose statement carries no account number (Trading 212): an empty account id does not prove that two
+// files belong to one account, so the user says which files go together.
+function AccountsSection({
+  files,
+  labels,
+  busy,
+  onApply,
+}: {
+  files: ImportedFile[];
+  labels: Record<string, string>;
+  busy: boolean;
+  onApply: (labels: Record<string, string>) => void;
+}) {
+  const t = useT();
+  const [draft, setDraft] = useState<Record<string, string>>(
+    () => Object.fromEntries(files.map(file => [file.name, labels[file.name] ?? '1'])),
+  );
+  const confirmed = files.every(file => file.accountConfirmed);
+  const options = files.map((_, index) => String(index + 1));
+
+  return (
+    <div className="no-print bg-slate-800 border border-slate-700 rounded-xl p-5 text-sm">
+      <h2 className="text-slate-200 font-medium">{t('dashboard.accounts.title')}</h2>
+      <p className="text-slate-500 mt-1">{t('dashboard.accounts.intro')}</p>
+      <p className={`mt-2 ${confirmed ? 'text-green-400' : 'text-amber-300'}`}>
+        {confirmed ? t('dashboard.accounts.confirmed') : t('dashboard.accounts.assumed')}
+      </p>
+      <form
+        className="mt-3 space-y-2"
+        onSubmit={(e) => { e.preventDefault(); onApply(draft); }}
+      >
+        {files.map(file => (
+          <label key={file.name} className="flex flex-wrap items-center gap-3">
+            <span className="text-slate-300 font-mono text-xs break-all">{file.name}</span>
+            {file.broker && <span className="text-slate-500 text-xs">{file.broker}</span>}
+            <select
+              value={draft[file.name] ?? '1'}
+              disabled={busy}
+              onChange={(e) => setDraft(prev => ({ ...prev, [file.name]: e.target.value }))}
+              aria-label={t('dashboard.accounts.fileAria', { name: file.name })}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-60"
+            >
+              {options.map(option => (
+                <option key={option} value={option}>{t('dashboard.accounts.option', { n: option })}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <button
+          type="submit"
+          disabled={busy}
+          className="mt-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg transition-colors"
+        >
+          {t('dashboard.accounts.apply')}
+        </button>
+      </form>
     </div>
   );
 }

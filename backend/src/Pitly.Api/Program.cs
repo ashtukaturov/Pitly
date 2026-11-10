@@ -16,6 +16,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
+// One total for the whole multipart request, the same as client_max_body_size in the Nginx configs.
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = UploadLimits.MaxRequestBytes);
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = UploadLimits.MaxRequestBytes;
+});
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -62,3 +69,6 @@ app.MapSessionEndpoints();
 app.MapExportEndpoints();
 
 app.Run();
+
+// Lets the end-to-end tests host the real application (WebApplicationFactory<Program>).
+public partial class Program;

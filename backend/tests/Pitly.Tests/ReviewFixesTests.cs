@@ -19,33 +19,98 @@ public class ReviewFixesTests
     [Fact]
     public void FormLayout_FollowsTheFormVersionOfTheTaxYear()
     {
-        var v17 = Pit38Fields.FromSummary(Summary(2024, 0m, 0m, 0m)).Form;
+        var v17 = Pit38Fields.FromSummary(Summary(2024, 0m, 0m, 0m)).Form!;
         Assert.Equal(17, v17.Version);
         Assert.Equal((28, 29, 31, 33, 45, 46, 47, 49), (v17.Straty, v17.Podstawa, v17.Podatek, v17.PodatekNalezny, v17.Zryczaltowany, v17.Zaplacony, v17.Roznica, v17.DoZaplaty));
+        Assert.Equal((22, 23, 24, 25, 26, 27, 44), (v17.InnePrzychody, v17.InneKoszty, v17.RazemPrzychody, v17.RazemKoszty, v17.Dochod, v17.Strata, v17.ZryczaltowanyNiepobrany));
 
-        var v18 = Pit38Fields.FromSummary(Summary(2025, 0m, 0m, 0m)).Form;
+        // PIT-38(18) added row 3 (poz. 24-25) to section C, so "Razem" and everything after it moved by two.
+        var v18 = Pit38Fields.FromSummary(Summary(2025, 0m, 0m, 0m)).Form!;
         Assert.Equal(18, v18.Version);
         Assert.Equal((30, 31, 33, 35, 47, 48, 49, 51), (v18.Straty, v18.Podstawa, v18.Podatek, v18.PodatekNalezny, v18.Zryczaltowany, v18.Zaplacony, v18.Roznica, v18.DoZaplaty));
+        Assert.Equal((22, 23, 26, 27, 28, 29, 46), (v18.InnePrzychody, v18.InneKoszty, v18.RazemPrzychody, v18.RazemKoszty, v18.Dochod, v18.Strata, v18.ZryczaltowanyNiepobrany));
+    }
+
+    [Theory]
+    [InlineData(2021, 15)]
+    [InlineData(2022, 16)]
+    [InlineData(2023, 16)]
+    [InlineData(2024, 17)]
+    [InlineData(2025, 18)]
+    public void FormLayout_ListsEveryVerifiedTaxYear(int year, int version)
+    {
+        Assert.Equal(version, Pit38FormLayout.ForYear(year)!.Version);
+        Assert.Contains(year, Pit38FormLayout.SupportedYears);
+    }
+
+    [Theory]
+    [InlineData(2020)]
+    [InlineData(2026)]
+    public void FormLayout_GivesNoFieldNumbersForAYearWithoutAVerifiedForm(int year)
+    {
+        var pit38 = Pit38Fields.FromSummary(Summary(year, dividendsPln: 100m, interestPln: 0m, creditable: 0m));
+
+        Assert.Null(pit38.Form);
+        // The amounts are still computed; only the numbering is withheld.
+        Assert.Equal(19m, pit38.ZryczaltowanyPodatek);
+        Assert.Equal(19m, pit38.PodatekDoZaplaty);
+    }
+
+    // Rounding order per the form PIT-38(18) and the Ministry's brochure, part G
+    // (https://www.podatki.gov.pl/media/g5ebnm2e/broszura-do-pit-38-za-2025-r.pdf, p. 8): the flat tax (poz. 47) and
+    // the tax paid abroad (poz. 48) are entered in zl, gr; only the difference (poz. 49) is rounded, to full PLN,
+    // or up to the grosz for interest under art. 30a ust. 1 pkt 1-3 (art. 63 par. 1a O.p.).
+    [Fact]
+    public void FlatTax_KeepsPrecisionUntilTheDifferenceIsRounded()
+    {
+        // Control example: dividend 103 PLN, creditable foreign tax 15.10 PLN.
+        var control = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 103m, interestPln: 0m, creditable: 15.10m));
+        Assert.Equal(19.57m, control.ZryczaltowanyPodatek);
+        Assert.Equal(15.10m, control.PodatekZaplaconyZaGranica);
+        // 19.57 - 15.10 = 4.47 -> 4 PLN. Rounding the tax to 20 PLN first would give 4.90 -> 5 PLN.
+        Assert.Equal(4m, control.Roznica);
+        Assert.Equal(4m, control.PodatekDoZaplaty);
+
+        // Dividends only: 23.161 PLN of tax is entered as 23.16; 23.161 - 18.76 = 4.401 -> 4 PLN.
+        var dividends = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 121.9m, interestPln: 0m, creditable: 18.76m));
+        Assert.Equal(23.16m, dividends.ZryczaltowanyPodatek);
+        Assert.Equal(18.76m, dividends.PodatekZaplaconyZaGranica);
+        Assert.Equal(4m, dividends.Roznica);
+
+        // A difference of exactly 50 groszy rounds up: 100 x 19% = 19.00, credit 14.50 -> 4.50 -> 5 PLN.
+        var half = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 100m, interestPln: 0m, creditable: 14.50m));
+        Assert.Equal(5m, half.Roznica);
     }
 
     [Fact]
-    public void FlatTax_RoundsDividendsToFullPlnAndInterestToGroszUp()
+    public void FlatTax_RoundsInterestUpToTheGrosz()
     {
-        // Dividends only: 23.16 PLN of tax rounds to 23 PLN; credit 18.76 -> difference 4.24 -> 4 PLN (art. 63 par. 1).
-        var dividends = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 121.9m, interestPln: 0m, creditable: 18.76m));
-        Assert.Equal(23m, dividends.Poz47ZryczaltowanyPodatek);
-        Assert.Equal(18.76m, dividends.Poz48PodatekZaplaconyZaGranica);
-        Assert.Equal(4m, dividends.Poz49Roznica);
-
         // Interest only (art. 30a ust. 1 pkt 1-3): 1.2331 -> 1.24 PLN, rounded up to the grosz (art. 63 par. 1a).
         var interest = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 0m, interestPln: 6.49m, creditable: 0m));
-        Assert.Equal(1.24m, interest.Poz47ZryczaltowanyPodatek);
-        Assert.Equal(1.24m, interest.Poz49Roznica);
+        Assert.Equal(1.24m, interest.ZryczaltowanyPodatek);
+        Assert.Equal(0m, interest.PodatekZaplaconyZaGranica);
+        Assert.Equal(1.24m, interest.Roznica);
 
-        // Mixed: each stream rounded on its own and then added.
+        // Foreign tax on interest is credited up to the Polish tax and the rest stays in groszy, not full PLN.
+        var withCredit = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 0m, interestPln: 100m, creditable: 10.01m, interestCreditable: 10.01m));
+        Assert.Equal(19m, withCredit.ZryczaltowanyPodatek);
+        Assert.Equal(10.01m, withCredit.PodatekZaplaconyZaGranica);
+        Assert.Equal(8.99m, withCredit.Roznica); // stays in groszy; 8.99 is not rounded to 9 PLN
+    }
+
+    [Fact]
+    public void FlatTax_RoundsAMixOfDividendsAndInterestStreamByStream()
+    {
+        // The Ministry gives no rule for one field holding both streams: each is rounded by its own rule, then added.
         var mixed = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 121.9m, interestPln: 6.49m, creditable: 18.76m));
-        Assert.Equal(24.24m, mixed.Poz47ZryczaltowanyPodatek);
-        Assert.Equal(5.24m, mixed.Poz49Roznica);
+        Assert.Equal(24.40m, mixed.ZryczaltowanyPodatek);      // 23.16 + 1.24
+        Assert.Equal(18.76m, mixed.PodatekZaplaconyZaGranica);
+        Assert.Equal(5.24m, mixed.Roznica);                    // 4 PLN (dividends) + 1.24 PLN (interest)
+
+        // The tax paid abroad can never exceed the flat tax it is credited against.
+        var capped = Pit38Fields.FromSummary(Summary(2025, dividendsPln: 103m, interestPln: 0m, creditable: 30m));
+        Assert.Equal(19.57m, capped.PodatekZaplaconyZaGranica);
+        Assert.Equal(0m, capped.Roznica);
     }
 
     [Fact]

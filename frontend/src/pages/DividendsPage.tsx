@@ -4,6 +4,7 @@ import { formatPln, formatUsd, formatRate, formatDate, formatTaxPeriod, hasCusto
 import type { AppState } from '../types';
 import EmptyState from '../components/EmptyState';
 import { useT } from '../i18n';
+import { formRefs } from '../pit38Form';
 
 const PL_TAX_RATE = 0.19;
 
@@ -84,7 +85,7 @@ export default function DividendsPage({ state }: { state: AppState }) {
         <div className="text-sm text-blue-300">
           <p>{t('dividends.info1')}</p>
           <p className="mt-1">{t('dividends.info2Before')}<strong>{t('dividends.info2Rate')}</strong>{t('dividends.info2After')}</p>
-          <p className="mt-1">{t('dividends.info3')}</p>
+          <p className="mt-1">{t('dividends.info3', { zrycz: formRefs(state.pit38?.form).zrycz })}</p>
         </div>
       </div>
 

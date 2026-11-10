@@ -19,4 +19,14 @@ body {
   .no-print {
     display: none !important;
   }
+  /* Result warnings are part of the printed report: dark text and a visible border on white paper. */
+  .print-warning,
+  .print-warning * {
+    color: black !important;
+  }
+  .print-warning {
+    border: 2px solid black !important;
+    background: white !important;
+    break-inside: avoid;
+  }
 }

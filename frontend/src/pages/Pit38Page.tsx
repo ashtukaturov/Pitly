@@ -4,27 +4,18 @@ import { formatPln, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState, Pit38Fields } from '../types';
 import EmptyState from '../components/EmptyState';
 import { useT, type TFunction } from '../i18n';
+import { formRefs, VERIFIED_FORM_YEARS } from '../pit38Form';
 
 // All PIT-38 values come from the backend (Pit38Fields.FromSummary, decimal arithmetic).
 // Nothing is re-derived here with floating point.
-// Translation function that also knows the field numbers of the form version for this tax year, so dictionary
-// strings can say "poz. {straty}" instead of hard-coding PIT-38(18) numbers.
+// Translation function that also knows how to refer to each field of the form version for this tax year
+// ("poz. 30", or the field name when no form is verified for the year), so dictionary strings can say "{straty}"
+// instead of hard-coding the numbers of one form version.
 function usePit38T(pit38: Pit38Fields | null): TFunction {
   const t = useT();
   const f = pit38?.form;
   return useCallback<TFunction>(
-    (key, params) => t(key, {
-      version: f?.version ?? 18,
-      straty: f?.straty ?? 30,
-      podstawa: f?.podstawa ?? 31,
-      podatek: f?.podatek ?? 33,
-      nalezny: f?.podatekNalezny ?? 35,
-      zrycz: f?.zryczaltowany ?? 47,
-      zaplacony: f?.zaplacony ?? 48,
-      roznica: f?.roznica ?? 49,
-      doZaplaty: f?.doZaplaty ?? 51,
-      ...params,
-    }),
+    (key, params) => t(key, { ...formRefs(f), ...params }),
     [t, f],
   );
 }
@@ -37,6 +28,9 @@ export default function Pit38Page({ state }: { state: AppState }) {
     return <EmptyState />;
   }
   const year = pit38.year;
+  const form = pit38.form;
+  // Field number as shown in the "Poz." column: a number only when the form of this tax year is verified.
+  const poz = (n: number | undefined) => (n === undefined ? t('pit38.noNumber') : String(n));
   const customTaxPeriod = hasCustomTaxPeriod(state.summary.year, state.summary.taxableFrom);
   const deadline = t('pit38.deadlineDate', { year: year + 1 });
 
@@ -45,8 +39,8 @@ export default function Pit38Page({ state }: { state: AppState }) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-white text-2xl font-bold">{t('pit38.title', { year })}</h1>
-          <p className="text-slate-400 mt-1">
-            {t('pit38.subtitle')}
+          <p className={form ? 'text-slate-400 mt-1' : 'text-amber-300 mt-1 max-w-2xl'}>
+            {form ? t('pit38.subtitle') : t('pit38.subtitleUnverified', { year, years: VERIFIED_FORM_YEARS })}
           </p>
           <p className="text-slate-500 text-sm mt-1">
             {t('pit38.taxablePeriod', { period: formatTaxPeriod(state.summary.taxableFrom, state.summary.taxableTo) })}
@@ -67,6 +61,31 @@ export default function Pit38Page({ state }: { state: AppState }) {
         </div>
       )}
 
+      {pit38.needsReimport && (
+        <div className="print-warning bg-red-500/10 border border-red-500/40 rounded-xl p-5 text-sm text-red-200 flex gap-3" role="alert">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-300" />
+          <div>
+            <p className="font-semibold text-red-100">{t('pit38.reimport.title')}</p>
+            <p className="mt-1">{t('pit38.reimport.body')}</p>
+          </div>
+        </div>
+      )}
+
+      {pit38.dataWarnings.length > 0 && (
+        <div className="print-warning bg-amber-500/10 border border-amber-500/40 rounded-xl p-5 text-sm text-amber-200" role="alert">
+          <p className="font-semibold text-amber-100 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-300" />
+            {t('pit38.dataWarnings.title')}
+          </p>
+          <p className="mt-1 text-amber-200/80">{t('pit38.dataWarnings.intro')}</p>
+          <ul className="mt-3 space-y-1.5 list-disc list-inside">
+            {pit38.dataWarnings.map((warning, i) => (
+              <li key={i}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Section title={t('pit38.sectionC.title')}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -82,7 +101,7 @@ export default function Pit38Page({ state }: { state: AppState }) {
             <tbody>
               <tr className="border-b border-slate-700/50">
                 <td className="px-6 py-3 text-slate-500">
-                  <span className="text-slate-600 font-mono text-xs mr-2">poz. 20, 21</span>
+                  {form && <span className="text-slate-600 font-mono text-xs mr-2">poz. {form.pit8cPrzychody}, {form.pit8cKoszty}</span>}
                   PIT-8C
                 </td>
                 <td className="px-6 py-3 text-right font-mono text-slate-600">&mdash;</td>
@@ -92,26 +111,26 @@ export default function Pit38Page({ state }: { state: AppState }) {
               </tr>
               <tr className="border-b border-slate-700/50 bg-slate-700/20">
                 <td className="px-6 py-3 text-slate-300">
-                  <span className="text-blue-400 font-mono text-xs mr-2">poz. 22, 23</span>
+                  {form && <span className="text-blue-400 font-mono text-xs mr-2">poz. {form.innePrzychody}, {form.inneKoszty}</span>}
                   {t('pit38.sectionC.rowInne')}
                 </td>
-                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.poz22Przychody)}</td>
-                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.poz23Koszty)}</td>
+                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.innePrzychody)}</td>
+                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.inneKoszty)}</td>
                 <td className="px-6 py-3"></td>
                 <td className="px-6 py-3"></td>
               </tr>
               <tr className="border-b border-slate-700/50 bg-slate-700/30">
                 <td className="px-6 py-3 text-slate-300 font-semibold">
-                  <span className="text-blue-400 font-mono text-xs mr-2">poz. 24–27</span>
+                  {form && <span className="text-blue-400 font-mono text-xs mr-2">poz. {form.razemPrzychody}–{form.strata}</span>}
                   {t('pit38.sectionC.rowRazem')}
                 </td>
-                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.poz24RazemPrzychody)}</td>
-                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.poz25RazemKoszty)}</td>
+                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.razemPrzychody)}</td>
+                <td className="px-6 py-3 text-right font-mono text-white font-medium">{formatPln(pit38.razemKoszty)}</td>
                 <td className="px-6 py-3 text-right font-mono text-white font-medium">
-                  {pit38.poz26Dochod > 0 ? formatPln(pit38.poz26Dochod) : <span className="text-slate-600">&mdash;</span>}
+                  {pit38.dochod > 0 ? formatPln(pit38.dochod) : <span className="text-slate-600">&mdash;</span>}
                 </td>
                 <td className="px-6 py-3 text-right font-mono text-white font-medium">
-                  {pit38.poz27Strata > 0 ? formatPln(pit38.poz27Strata) : <span className="text-slate-600">&mdash;</span>}
+                  {pit38.strata > 0 ? formatPln(pit38.strata) : <span className="text-slate-600">&mdash;</span>}
                 </td>
               </tr>
             </tbody>
@@ -124,10 +143,10 @@ export default function Pit38Page({ state }: { state: AppState }) {
 
       <Section title={t('pit38.sectionD.title')}>
         <FieldTable rows={[
-          { poz: String(pit38.form.straty), name: t('pit38.sectionD.poz30.name'), value: pit38.poz30StratyZLatUbieglych, note: t('pit38.sectionD.poz30.note') },
-          { poz: String(pit38.form.podstawa), name: t('pit38.sectionD.poz31.name'), value: pit38.poz31PodstawaObliczenia, note: t('pit38.sectionD.poz31.note') },
-          { poz: String(pit38.form.podatek), name: t('pit38.sectionD.poz33.name'), value: pit38.poz33Podatek },
-          { poz: String(pit38.form.podatekNalezny), name: t('pit38.sectionD.poz35.name'), value: pit38.poz35PodatekNalezny, note: t('pit38.sectionD.poz35.note') },
+          { poz: poz(form?.straty), name: t('pit38.sectionD.poz30.name'), value: pit38.stratyZLatUbieglych, note: t('pit38.sectionD.poz30.note') },
+          { poz: poz(form?.podstawa), name: t('pit38.sectionD.poz31.name'), value: pit38.podstawaObliczenia, note: t('pit38.sectionD.poz31.note') },
+          { poz: poz(form?.podatek), name: t('pit38.sectionD.poz33.name'), value: pit38.podatek },
+          { poz: poz(form?.podatekNalezny), name: t('pit38.sectionD.poz35.name'), value: pit38.podatekNalezny, note: t('pit38.sectionD.poz35.note') },
         ]} />
         <PriorYearLossBreakdown pit38={pit38} />
       </Section>
@@ -139,18 +158,18 @@ export default function Pit38Page({ state }: { state: AppState }) {
           <span className="text-slate-600 text-xs ml-2">{t('pit38.sectionG.informational')}</span>
         </div>
         <FieldTable rows={[
-          { poz: String(pit38.form.zryczaltowany), name: t('pit38.sectionG.poz47.name'), value: pit38.poz47ZryczaltowanyPodatek },
-          { poz: String(pit38.form.zaplacony), name: t('pit38.sectionG.poz48.name'), value: pit38.poz48PodatekZaplaconyZaGranica, note: t('pit38.sectionG.poz48.note') },
-          { poz: String(pit38.form.roznica), name: t('pit38.sectionG.poz49.name'), value: pit38.poz49Roznica, note: t('pit38.sectionG.poz49.note') },
+          { poz: poz(form?.zryczaltowany), name: t('pit38.sectionG.poz47.name'), value: pit38.zryczaltowanyPodatek },
+          { poz: poz(form?.zaplacony), name: t('pit38.sectionG.poz48.name'), value: pit38.podatekZaplaconyZaGranica, note: t('pit38.sectionG.poz48.note') },
+          { poz: poz(form?.roznica), name: t('pit38.sectionG.poz49.name'), value: pit38.roznica, note: t('pit38.sectionG.poz49.note') },
         ]} />
       </Section>
 
       <div className="bg-blue-500/10 border-2 border-blue-500 rounded-xl p-8 text-center">
         <FileText className="w-10 h-10 text-blue-400 mx-auto mb-3" />
-        <p className="text-slate-500 text-xs font-mono mb-1">Poz. {pit38.form.doZaplaty}</p>
+        {form && <p className="text-slate-500 text-xs font-mono mb-1">Poz. {form.doZaplaty}</p>}
         <p className="text-blue-300 text-sm mb-1">{t('pit38.total.label')}</p>
-        <p className="text-white text-3xl font-bold font-mono tabular-nums">{formatPln(pit38.poz51PodatekDoZaplaty)}</p>
-        <p className="text-slate-400 text-xs mt-1">= poz. {pit38.form.podatekNalezny} + poz. {pit38.form.roznica}</p>
+        <p className="text-white text-3xl font-bold font-mono tabular-nums">{formatPln(pit38.podatekDoZaplaty)}</p>
+        <p className="text-slate-400 text-xs mt-1">{t('pit38.total.formula')}</p>
         <p className="text-slate-400 text-sm mt-2">{t('pit38.total.deadline', { date: deadline })}</p>
       </div>
 
@@ -170,7 +189,7 @@ export default function Pit38Page({ state }: { state: AppState }) {
         </div>
       ) : (
         <p className="text-slate-500 text-xs px-1">
-          {t('pit38.danina.notTriggered', { amount: formatPln(pit38.poz31PodstawaObliczenia) })}
+          {t('pit38.danina.notTriggered', { amount: formatPln(pit38.podstawaObliczenia) })}
         </p>
       )}
 
@@ -204,8 +223,8 @@ function FieldTable({ rows }: { rows: { poz: string; name: string; value: number
         </tr>
       </thead>
       <tbody>
-        {rows.map(({ poz, name, value, note }) => (
-          <tr key={poz} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+        {rows.map(({ poz, name, value, note }, index) => (
+          <tr key={index} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
             <td className="px-6 py-3 text-blue-400 font-mono font-medium">{poz}</td>
             <td className="px-6 py-3">
               <span className="text-slate-300">{name}</span>
@@ -228,7 +247,7 @@ function Val({ v }: { v: number }) {
 function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: number; hasDividends: boolean }) {
   const t = usePit38T(pit38);
   const [open, setOpen] = useState(false);
-  const hasCapitalGains = pit38.poz22Przychody > 0 || pit38.poz23Koszty > 0;
+  const hasCapitalGains = pit38.innePrzychody > 0 || pit38.inneKoszty > 0;
   const clickNext = (
     <p>{t('pit38.guide.click')}<strong className="text-white">{t('pit38.guide.next')}</strong>.</p>
   );
@@ -303,7 +322,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
             <ul className="list-disc list-inside space-y-2 mt-2">
               <li>
                 <strong className="text-white">&quot;{t('pit38.guide.step4.field1.label')}&quot;</strong>
-                {' '}&rarr; {t('pit38.guide.enter')} <Val v={pit38.poz22Przychody} />
+                {' '}&rarr; {t('pit38.guide.enter')} <Val v={pit38.innePrzychody} />
                 <span className="block text-slate-500 text-xs ml-6">
                   {t('pit38.guide.step4.field1.help')}
                   {!hasCapitalGains && t('pit38.guide.step4.zeroHint')}
@@ -311,7 +330,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
               </li>
               <li>
                 <strong className="text-white">&quot;{t('pit38.guide.step4.field2.label')}&quot;</strong>
-                {' '}&rarr; {t('pit38.guide.enter')} <Val v={pit38.poz23Koszty} />
+                {' '}&rarr; {t('pit38.guide.enter')} <Val v={pit38.inneKoszty} />
                 <span className="block text-slate-500 text-xs ml-6">
                   {t('pit38.guide.step4.field2.help')}
                   {!hasCapitalGains && t('pit38.guide.step4.zeroHint')}
@@ -335,9 +354,9 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
             <div className="space-y-4 mt-3">
               <div>
                 <p className="text-white font-medium text-xs uppercase tracking-wider mb-1">{t('pit38.sectionD.poz30.name')}</p>
-                {pit38.poz30StratyZLatUbieglych > 0 ? (
+                {pit38.stratyZLatUbieglych > 0 ? (
                   <p>
-                    {t('pit38.guide.step5.enter')}<Val v={pit38.poz30StratyZLatUbieglych} />{t('pit38.guide.step5.loss.after')}
+                    {t('pit38.guide.step5.enter')}<Val v={pit38.stratyZLatUbieglych} />{t('pit38.guide.step5.loss.after')}
                   </p>
                 ) : (
                   <p>
@@ -357,7 +376,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
                 </p>
                 {hasDividends ? (
                   <p>
-                    {t('pit38.guide.step5.enter')}<Val v={pit38.poz47ZryczaltowanyPodatek} />{t('pit38.guide.step5.foreignFlat.after')}
+                    {t('pit38.guide.step5.enter')}<Val v={pit38.zryczaltowanyPodatek} />{t('pit38.guide.step5.foreignFlat.after')}
                     <span className="block text-slate-500 text-xs">
                       {t('pit38.guide.step5.foreignFlat.help', { amount: formatPln(pit38.totalDividendsPln) })}
                     </span>
@@ -373,7 +392,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
                 </p>
                 {hasDividends ? (
                   <p>
-                    {t('pit38.guide.step5.enter')}<Val v={pit38.poz48PodatekZaplaconyZaGranica} />{t('pit38.guide.step5.paidAbroad.after')}
+                    {t('pit38.guide.step5.enter')}<Val v={pit38.podatekZaplaconyZaGranica} />{t('pit38.guide.step5.paidAbroad.after')}
                     <span className="block text-slate-500 text-xs">
                       {t('pit38.guide.step5.paidAbroad.help')}
                     </span>
@@ -405,8 +424,8 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
           <GuideStep n={7} title={t('pit38.guide.step7.title')}>
             <p>{t('pit38.guide.step7.intro')}</p>
             <ul className="list-disc list-inside space-y-1 mt-2">
-              <li>{t('pit38.guide.step7.income')}{hasCapitalGains ? formatPln(pit38.poz26Dochod) : '0,00 zł'}</li>
-              <li>{t('pit38.guide.step7.toPay')}<Val v={pit38.poz51PodatekDoZaplaty} /></li>
+              <li>{t('pit38.guide.step7.income')}{hasCapitalGains ? formatPln(pit38.dochod) : '0,00 zł'}</li>
+              <li>{t('pit38.guide.step7.toPay')}<Val v={pit38.podatekDoZaplaty} /></li>
             </ul>
             <p className="mt-3">{t('pit38.guide.step7.fromHere')}</p>
             <ul className="list-disc list-inside space-y-2 mt-1">
@@ -422,7 +441,7 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
                 {t('pit38.guide.step7.upo.before')}<strong className="text-white">UPO</strong>
                 {t('pit38.guide.step7.upo.after')}
               </li>
-              {pit38.poz51PodatekDoZaplaty > 0 && (
+              {pit38.podatekDoZaplaty > 0 && (
                 <li>
                   {t('pit38.guide.click')}<strong className="text-white">&quot;{t('pit38.guide.step7.pay.button')}&quot;</strong>
                   {t('pit38.guide.step7.pay.after')}
@@ -431,8 +450,8 @@ function EpityGuide({ pit38, year, hasDividends }: { pit38: Pit38Fields; year: n
             </ul>
             <p className="mt-2">
               {t('pit38.guide.step7.deadline')}<strong className="text-white">{t('pit38.deadlineDate', { year: year + 1 })}</strong>.
-              {pit38.poz51PodatekDoZaplaty > 0 && (
-                <span>{t('pit38.guide.step7.mustPay.before')}<Val v={pit38.poz51PodatekDoZaplaty} />{t('pit38.guide.step7.mustPay.after')}</span>
+              {pit38.podatekDoZaplaty > 0 && (
+                <span>{t('pit38.guide.step7.mustPay.before')}<Val v={pit38.podatekDoZaplaty} />{t('pit38.guide.step7.mustPay.after')}</span>
               )}
             </p>
           </GuideStep>

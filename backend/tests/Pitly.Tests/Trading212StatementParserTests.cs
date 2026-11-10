@@ -25,7 +25,10 @@ public class Trading212StatementParserTests
 
         Assert.Equal(2, parsed.Trades.Count);
         Assert.Single(parsed.Dividends);
-        Assert.Single(parsed.WithholdingTaxes);
+        // Withholding stays attached to its dividend row instead of becoming a separate row to re-match.
+        Assert.Empty(parsed.WithholdingTaxes);
+        Assert.Null(parsed.AccountId);
+        Assert.Equal("Trading 212", parsed.Broker);
 
         var firstTrade = parsed.Trades[0];
         Assert.Equal(TradeType.Buy, firstTrade.Type);
@@ -40,9 +43,10 @@ public class Trading212StatementParserTests
         Assert.Equal("US30303M1027", dividend.Isin);
         Assert.Equal(0.1021797412125m, dividend.Amount);
 
-        var withholding = parsed.WithholdingTaxes[0];
-        Assert.Equal("USD", withholding.Currency);
-        Assert.Equal(0.02m, withholding.Amount);
+        Assert.Equal("USD", dividend.WithheldCurrency);
+        Assert.Equal(0.02m, dividend.WithheldAmount);
+        Assert.Equal("4", dividend.TransactionId);
+        Assert.Equal("2", firstTrade.TransactionId);
     }
 
     [Fact]

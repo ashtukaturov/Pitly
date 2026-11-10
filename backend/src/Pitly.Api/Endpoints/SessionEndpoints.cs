@@ -1,6 +1,5 @@
 using Pitly.Api.Data;
 using Pitly.Api.Mapping;
-using Pitly.Core.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Pitly.Api.Endpoints;
@@ -69,23 +68,9 @@ public static class SessionEndpoints
             if (session is null)
                 return Results.NotFound(new { error = "Session not found" });
 
-            var taxPeriod = EntityMapper.ToTaxPeriod(session);
-            var summary = new TaxSummary(
-                session.TotalProceedsPln, session.TotalCostPln,
-                session.CapitalGainPln, session.CapitalGainTaxPln,
-                session.TotalDividendsPln, session.TotalWithholdingPln,
-                session.TotalCreditableWithholdingPln,
-                session.DividendTaxOwedPln, session.Year,
-                taxPeriod.TaxableFrom, taxPeriod.TaxableTo,
-                [], [],
-                PriorYearLossJson.Deserialize(session.PriorYearLossesJson),
-                Warnings: EntityMapper.DeserializeWarnings(session.WarningsJson),
-                Countries: EntityMapper.DeserializeCountries(session.CountriesJson),
-                TotalInterestPln: session.TotalInterestPln,
-                TotalInterestCreditableWithholdingPln: session.TotalInterestCreditableWithholdingPln);
-
-            var pit38 = Pit38Fields.FromSummary(summary);
-            return Results.Ok(pit38);
+            // Recomputed from the stored session exactly as after the import, including the warnings that
+            // belong next to the result.
+            return Results.Ok(EntityMapper.ToPit38(session));
         });
     }
 }

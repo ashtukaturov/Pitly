@@ -1,10 +1,13 @@
 import { useState, useCallback } from 'react';
 import { Upload, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { importFiles } from '../api';
+import { describeImportError, importFiles, ImportError } from '../api';
 import type { AppState } from '../types';
 import PriorYearLossesInput from '../components/PriorYearLossesInput';
 import { validatePriorYearLossRows, type PriorYearLossRow } from '../priorYearLosses';
 import { useT, useLang, type Lang } from '../i18n/index';
+
+// Stable default so the import callback is not rebuilt on every render
+const NO_ACCOUNT_LABELS: Record<string, string> = {};
 
 type Step = 'idle' | 'parsing' | 'rates' | 'calculating' | 'done' | 'error';
 
@@ -49,11 +52,14 @@ function HelpSection({ title, children }: { title: string; children: React.React
 export default function ImportPage({
   onComplete,
   existingFiles = [],
+  accountLabels = NO_ACCOUNT_LABELS,
   onStartOver,
 }: {
   onComplete: (data: AppState) => void;
   // Files from the previous import; new uploads are added to them so statements can arrive in several batches
   existingFiles?: File[];
+  // The user's earlier choice of account for files without an account number
+  accountLabels?: Record<string, string>;
   onStartOver?: () => void;
 }) {
   const t = useT();
@@ -61,17 +67,14 @@ export default function ImportPage({
   const [step, setStep] = useState<Step>('idle');
   const [error, setError] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  // Other years the failed upload covers: offered as a way out when the default (latest) year cannot be calculated
+  const [otherYears, setOtherYears] = useState<number[]>([]);
   const [residencyStartDate, setResidencyStartDate] = useState('');
   const [priorYearLosses, setPriorYearLosses] = useState<PriorYearLossRow[]>([]);
 
   const [dragOver, setDragOver] = useState(false);
 
-  const processFiles = useCallback(async (files: File[]) => {
-    if (files.length === 0) {
-      setError(t('import.errorNoFiles'));
-      return;
-    }
-
+  const processFiles = useCallback(async (files: File[], taxYear?: number) => {
     if (files.some(file => !file.name.toLowerCase().endsWith('.csv'))) {
       setError(t('import.errorCsvOnly'));
       return;
@@ -84,7 +87,13 @@ export default function ImportPage({
     for (const f of files) merged.set(f.name, f);
     const allFiles = Array.from(merged.values());
 
+    if (allFiles.length === 0) {
+      setError(t('import.errorNoFiles'));
+      return;
+    }
+
     setError('');
+    setOtherYears([]);
     setStep('parsing');
 
     const timer1 = setTimeout(() => setStep('rates'), 500);
@@ -99,7 +108,12 @@ export default function ImportPage({
         setError(lossCheck.error);
         return;
       }
-      const result = await importFiles(allFiles, residencyStartDate || undefined, lossCheck.losses.length > 0 ? lossCheck.losses : undefined);
+      const result = await importFiles(allFiles, {
+        residencyStartDate: residencyStartDate || undefined,
+        priorYearLosses: lossCheck.losses.length > 0 ? lossCheck.losses : undefined,
+        taxYear,
+        accountLabels,
+      });
       clearTimeout(timer1);
       clearTimeout(timer2);
       setPendingFiles([]);
@@ -115,16 +129,23 @@ export default function ImportPage({
           availableYears: result.availableYears,
           residencyStartDate: residencyStartDate || undefined,
           priorYearLosses: lossCheck.losses,
+          importedFiles: result.files,
+          accountLabels,
         });
       }, 600);
     } catch (err: unknown) {
       clearTimeout(timer1);
       clearTimeout(timer2);
-      setPendingFiles(allFiles);
+      // A file that is too large must not stay queued, or every later attempt would fail on it again.
+      const rejected = err instanceof ImportError && err.code === 'file_too_large' ? err.fileName : undefined;
+      const tooMuchAtOnce = err instanceof ImportError && err.code === 'request_too_large';
+      setPendingFiles(tooMuchAtOnce ? pendingFiles : allFiles.filter(f => f.name !== rejected));
       setStep('error');
-      setError(err instanceof Error ? err.message : t('import.errorFailed'));
+      setError(describeImportError(err, t));
+      if (err instanceof ImportError)
+        setOtherYears(err.availableYears.filter(year => year !== err.taxYear));
     }
-  }, [onComplete, pendingFiles, existingFiles, residencyStartDate, priorYearLosses, t]);
+  }, [onComplete, pendingFiles, existingFiles, accountLabels, residencyStartDate, priorYearLosses, t]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -212,6 +233,23 @@ export default function ImportPage({
                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
+              {otherYears.length > 0 && (
+                <div className="ml-7 text-slate-300">
+                  <span>{t('import.tryYear')}</span>
+                  <span className="mt-2 flex flex-wrap gap-2">
+                    {otherYears.map(year => (
+                      <button
+                        key={year}
+                        type="button"
+                        onClick={() => processFiles([], year)}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        {t('import.tryYearButton', { year })}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              )}
               {pendingFiles.length > 0 && (
                 <div className="ml-7 text-slate-400">
                   <span className="text-slate-300">{t('import.queuedLabel')}</span>{' '}

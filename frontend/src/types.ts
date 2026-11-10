@@ -18,7 +18,7 @@ export interface TradeResult {
   isin?: string | null;
 }
 
-/** Flat-tax (art. 30a) income stream. All are taxed at 19% and reported in PIT-38 poz. 47. */
+/** Flat-tax (art. 30a) income stream. All are taxed at 19% and reported in the same PIT-38 field. */
 export type IncomeKind = 'Dividend' | 'PaymentInLieu' | 'Interest';
 
 export interface DividendResult {
@@ -60,6 +60,7 @@ export interface TaxSummary {
   totalProceedsPln: number;
   totalCostPln: number;
   capitalGainPln: number;
+  /** Same figure as PIT-38 "Podatek należny" (after the loss deduction); kept for the session API. */
   capitalGainTaxPln: number;
   totalDividendsPln: number;
   totalWithholdingPln: number;
@@ -68,10 +69,11 @@ export interface TaxSummary {
   year: number;
   taxableFrom: string;
   taxableTo: string;
-  /** Amount actually deducted in poz. 30 (computed by the backend from the entered losses). */
+  /** Amount actually deducted as "Straty z lat ubiegłych" (computed by the backend from the entered losses). */
   priorYearLossPln: number;
   /** Parser warnings: corporate actions handled with a conservative assumption, ignored rows, etc. */
   warnings: string[];
+  needsReimport?: boolean;
 }
 
 /** A capital-gains loss from an earlier PIT-38, as entered on the Import page. */
@@ -101,22 +103,22 @@ export interface PriorYearLossLine {
 export interface Pit38Fields {
   year: number;
   // Section C
-  poz22Przychody: number;
-  poz23Koszty: number;
-  poz24RazemPrzychody: number;
-  poz25RazemKoszty: number;
-  poz26Dochod: number;
-  poz27Strata: number;
+  innePrzychody: number;
+  inneKoszty: number;
+  razemPrzychody: number;
+  razemKoszty: number;
+  dochod: number;
+  strata: number;
   // Section D
-  poz30StratyZLatUbieglych: number;
-  poz31PodstawaObliczenia: number;
-  poz33Podatek: number;
-  poz35PodatekNalezny: number;
+  stratyZLatUbieglych: number;
+  podstawaObliczenia: number;
+  podatek: number;
+  podatekNalezny: number;
   // Section G
-  poz47ZryczaltowanyPodatek: number;
-  poz48PodatekZaplaconyZaGranica: number;
-  poz49Roznica: number;
-  poz51PodatekDoZaplaty: number;
+  zryczaltowanyPodatek: number;
+  podatekZaplaconyZaGranica: number;
+  roznica: number;
+  podatekDoZaplaty: number;
   // Danina solidarnosciowa (DSF-1, art. 30h)
   daninaSolidarnosciowaNadwyzka: number;
   daninaSolidarnosciowaPln: number;
@@ -127,26 +129,52 @@ export interface Pit38Fields {
   warnings: string[];
   // PIT/ZG annex rows
   pitZg: CountryIncome[];
-  // Field numbers of the form version for this tax year (PIT-38(17) up to 2024, PIT-38(18) from 2025)
-  form: Pit38FormLayout;
+  // Field numbers of the verified form version for this tax year; null when no version is verified for it
+  form: Pit38FormLayout | null;
+  // Warnings that put the amounts themselves in doubt (history that does not add up, unattributed withholding)
+  dataWarnings: string[];
+  // Saved by an older version without the data needed to rebuild the amounts exactly
+  needsReimport: boolean;
 }
 
+/** Field numbers (poz.) of one verified PIT-38 form version; mirrors backend Pit38FormLayout. */
 export interface Pit38FormLayout {
   version: number;
+  pit8cPrzychody: number;
+  pit8cKoszty: number;
+  innePrzychody: number;
+  inneKoszty: number;
+  razemPrzychody: number;
+  razemKoszty: number;
+  dochod: number;
+  strata: number;
   straty: number;
   podstawa: number;
   podatek: number;
   podatekNalezny: number;
+  zryczaltowanyNiepobrany: number;
   zryczaltowany: number;
   zaplacony: number;
   roznica: number;
   doZaplaty: number;
 }
 
+/** One uploaded file and the broker account it was attributed to. */
+export interface ImportedFile {
+  name: string;
+  broker: string | null;
+  account: string;
+  /** The statement itself names its account (Interactive Brokers). */
+  accountKnown: boolean;
+  /** The account is named by the statement or was chosen by the user. */
+  accountConfirmed: boolean;
+}
+
 export interface ImportResponse {
   sessionId: string;
-  /** Statement years found in the upload; any of them can be chosen as the tax year. */
+  /** Years found anywhere in the upload; any of them can be chosen as the tax year. */
   availableYears: number[];
+  files: ImportedFile[];
   summary: TaxSummary;
   pit38: Pit38Fields;
   trades: TradeResult[];
@@ -171,4 +199,15 @@ export interface AppState {
   availableYears: number[];
   residencyStartDate?: string;
   priorYearLosses: PriorYearLossInput[];
+  // Accounts the uploaded files were attributed to, and the user's choice for files without an account number
+  importedFiles: ImportedFile[];
+  accountLabels: Record<string, string>;
+}
+
+/** What the dashboard can ask to recalculate without re-selecting the files. */
+export interface RecalculateOptions {
+  year?: number;
+  residencyStartDate?: string;
+  /** For files without an account number: file name -> account label chosen by the user. */
+  accountLabels?: Record<string, string>;
 }

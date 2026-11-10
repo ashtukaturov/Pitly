@@ -7,9 +7,22 @@ import DashboardPage from './pages/DashboardPage';
 import TransactionsPage from './pages/TransactionsPage';
 import DividendsPage from './pages/DividendsPage';
 import Pit38Page from './pages/Pit38Page';
-import { importFiles } from './api';
+import { describeImportError, importFiles } from './api';
 import { useT } from './i18n';
-import type { AppState } from './types';
+import type { AppState, RecalculateOptions } from './types';
+
+const emptyState: AppState = {
+  sessionId: null,
+  summary: null,
+  pit38: null,
+  trades: [],
+  dividends: [],
+  files: [],
+  availableYears: [],
+  priorYearLosses: [],
+  importedFiles: [],
+  accountLabels: {},
+};
 
 function AppLayout({ year }: { year: number | null }) {
   return (
@@ -25,30 +38,12 @@ function AppLayout({ year }: { year: number | null }) {
 export default function App() {
   const navigate = useNavigate();
   const t = useT();
-  const [state, setState] = useState<AppState>({
-    sessionId: null,
-    summary: null,
-    pit38: null,
-    trades: [],
-    dividends: [],
-    files: [],
-    availableYears: [],
-    priorYearLosses: [],
-  });
+  const [state, setState] = useState<AppState>(emptyState);
   const [switchingYear, setSwitchingYear] = useState(false);
   const [yearError, setYearError] = useState<string | null>(null);
 
   const handleStartOver = () => {
-    setState({
-      sessionId: null,
-      summary: null,
-      pit38: null,
-      trades: [],
-      dividends: [],
-      files: [],
-      availableYears: [],
-      priorYearLosses: [],
-    });
+    setState(emptyState);
     setYearError(null);
   };
 
@@ -58,15 +53,21 @@ export default function App() {
     navigate('/app/dashboard');
   };
 
-  // Recalculate the same upload for another tax year or residency start date; the files stay in memory.
-  const handleRecalculate = async (options: { year?: number; residencyStartDate?: string }) => {
+  // Recalculate the same upload for another tax year, residency start date or account assignment; the files stay in memory.
+  const handleRecalculate = async (options: RecalculateOptions) => {
     if (state.files.length === 0) return;
     const year = options.year ?? state.summary?.year;
     const residencyStartDate = 'residencyStartDate' in options ? options.residencyStartDate : state.residencyStartDate;
+    const accountLabels = options.accountLabels ?? state.accountLabels;
     setSwitchingYear(true);
     setYearError(null);
     try {
-      const result = await importFiles(state.files, residencyStartDate, state.priorYearLosses, year);
+      const result = await importFiles(state.files, {
+        residencyStartDate,
+        priorYearLosses: state.priorYearLosses,
+        taxYear: year,
+        accountLabels,
+      });
       setState(prev => ({
         ...prev,
         sessionId: result.sessionId,
@@ -75,10 +76,12 @@ export default function App() {
         trades: result.trades,
         dividends: result.dividends,
         availableYears: result.availableYears,
+        importedFiles: result.files,
+        accountLabels,
         residencyStartDate,
       }));
     } catch (err: unknown) {
-      setYearError(err instanceof Error ? err.message : t('app.switchYearFailed'));
+      setYearError(describeImportError(err, t) || t('app.switchYearFailed'));
     } finally {
       setSwitchingYear(false);
     }
@@ -90,7 +93,14 @@ export default function App() {
       <Route path="/app" element={<AppLayout year={state.summary?.year ?? null} />}>
         <Route
           index
-          element={<ImportPage onComplete={handleImportComplete} existingFiles={state.files} onStartOver={handleStartOver} />}
+          element={
+            <ImportPage
+              onComplete={handleImportComplete}
+              existingFiles={state.files}
+              accountLabels={state.accountLabels}
+              onStartOver={handleStartOver}
+            />
+          }
         />
         <Route
           path="dashboard"

@@ -9,6 +9,8 @@ namespace Pitly.Broker.InteractiveBrokers;
 
 public partial class InteractiveBrokersStatementParser : IStatementParser
 {
+    public const string BrokerName = "Interactive Brokers";
+
     private readonly ILogger<InteractiveBrokersStatementParser> _logger;
 
     public InteractiveBrokersStatementParser(ILogger<InteractiveBrokersStatementParser> logger)
@@ -114,7 +116,7 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             warnings.Add(
                 $"{yearLabel} statement contains no trades, dividends, interest or corporate actions (only cash movements such as deposits). " +
                 "There is nothing to declare from it.");
-            return new ParsedStatement([], [], [], [], [], statementYear, warnings, accountId);
+            return new ParsedStatement([], [], [], [], [], statementYear, warnings, accountId, BrokerName);
         }
 
         foreach (var fields in tradeRows)
@@ -150,7 +152,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             carryInPositions,
             statementYear,
             warnings,
-            accountId);
+            accountId,
+            BrokerName);
     }
 
     private void TryParseTrade(
@@ -325,8 +328,16 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var row = TryParseIncomeRow(fields, "dividend");
         if (row is null) return;
         var (symbol, isin, currency, date, amount) = row.Value;
-        dividends.Add(new RawDividend(symbol, currency, date, amount, isin));
+
+        // IB also lists substitute payments in the Dividends section ("... Payment in Lieu of Dividend (Ordinary
+        // Dividend)") and labels their tax "... Payment in Lieu of Dividend - US Tax". Both sides must get the same
+        // kind, otherwise that withholding matches no payment and its credit is lost.
+        var kind = IsPaymentInLieu(Clean(fields[4])) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
+        dividends.Add(new RawDividend(symbol, currency, date, amount, isin, kind));
     }
+
+    private static bool IsPaymentInLieu(string description)
+        => description.Contains("Payment in Lieu", StringComparison.OrdinalIgnoreCase);
 
     private void TryParsePaymentInLieu(List<string> fields, List<RawDividend> income)
     {
@@ -382,10 +393,7 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var (symbol, isin, currency, date, amount) = row.Value;
 
         // IB labels withholding on substitute payments "... Payment in Lieu of Dividend - US Tax".
-        var description = Clean(fields[4]);
-        var kind = description.Contains("Payment in Lieu", StringComparison.OrdinalIgnoreCase)
-            ? IncomeKind.PaymentInLieu
-            : IncomeKind.Dividend;
+        var kind = IsPaymentInLieu(Clean(fields[4])) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
 
         taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin, kind));
     }
