@@ -43,15 +43,8 @@ export default function Sidebar({ year }: { year: number | null }) {
         ))}
       </nav>
 
-      <div className="px-3 py-3 border-t border-slate-800">
-        {/* Collapsed: a vertical stack of short codes; expanded: full names in a row */}
-        <div className="group-hover:hidden flex flex-col items-center gap-1">
-          <LanguageSwitcher compact />
-        </div>
-        <div className="hidden group-hover:flex flex-col gap-2">
-          <span className="text-slate-500 text-xs whitespace-nowrap">{t('nav.language')}</span>
-          <LanguageSwitcher />
-        </div>
+      <div className="border-t border-slate-800">
+        <LanguageSwitcher variant="sidebar" />
       </div>
 
       {year && (

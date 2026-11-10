@@ -4,7 +4,7 @@ export type Lang = 'en' | 'uk' | 'pl';
 
 export const LANGUAGES: { code: Lang; label: string; short: string }[] = [
   { code: 'en', label: 'English', short: 'EN' },
-  { code: 'uk', label: 'Українська', short: 'UK' },
+  { code: 'uk', label: 'Українська', short: 'UA' },
   { code: 'pl', label: 'Polski', short: 'PL' },
 ];
 
