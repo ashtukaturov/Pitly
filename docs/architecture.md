@@ -13,7 +13,7 @@ ImportEndpoints          size limits, form fields, error shapes
    ▼
 ImportService            one pass per request:
    1. StatementParserDispatcher   pick the broker parser from the first line
-   2. broker parser               CSV text -> ParsedStatement (rows in the broker's currency)
+   2. broker parser               CSV text -> ParsedStatement per account (rows in the broker's currency)
    3. StatementMerger             resolve the account of each file, drop rows another file already gave
    4. TaxCalculator               CapitalGainsTaxCalculator + DividendTaxCalculator -> TaxSummary (PLN)
    5. Pit38Fields.FromSummary     losses, rounding, form layout -> the declared fields
@@ -32,6 +32,7 @@ the same files again with different options and replaces the result.
 | `Pitly.Core` | Models, merging, all tax arithmetic, the NBP rate client. No knowledge of HTTP, SQLite or any broker's CSV format. |
 | `Pitly.Broker.InteractiveBrokers` | Parses the IB Activity Statement (sections `Trades`, `Dividends`, `Withholding Tax`, `Interest`, `Corporate Actions`, opening positions). |
 | `Pitly.Broker.Trading212` | Parses the Trading 212 history export (one row per operation, with an `ID` column). |
+| `Pitly.Broker.Generic` | Parses the generic trades and income templates (any broker). Strict: numbers with a dot, known values only, errors name the line. Returns one statement per `broker` value through `ParseAll`. |
 | `Pitly.Api` | Endpoints, `ImportService`, EF Core entities, `DbSchemaUpgrader`, session cleanup. |
 | `Pitly.Tests` | xUnit tests for all of the above, including end-to-end tests through the real API. |
 
@@ -42,7 +43,10 @@ the same files again with different options and replaces the result.
   statement's `AccountId` and `Broker`.
 - `Trade`, `RawDividend`, `RawWithholdingTax`, `CorporateAction`, `CarryInPosition` each carry an `AccountId`
   stamped by `StatementMerger`. `Trade` and `RawDividend` also carry the broker's `TransactionId` when the
-  export has one.
+  export has one, and a `CountryCode` when the statement names the source country (generic CSV); it travels to
+  `TradeResult` and `Dividend` and is stored with the row.
+- `IStatementParser.Parse` returns one statement; `ParseAll` (default: a list with that one statement) returns
+  one per account for formats whose file may hold several, and is what `ImportService` calls.
 - `TaxPeriod`: the tax year and the taxable window inside it (the whole year, or from the residency start date).
 - `TaxSummary`: totals in PLN, the per-row results, `Warnings` (everything worth telling the user) and
   `ResultWarnings` (the subset that puts the amounts themselves in doubt).
@@ -53,7 +57,8 @@ the same files again with different options and replaces the result.
 
 Each uploaded file is resolved to one account:
 
-1. the account number in the statement (IB prints it), upper-cased;
+1. the account number in the statement (IB prints it; a generic CSV file names the broker, which is its
+   account), upper-cased;
 2. otherwise the label the user chose for that file on the dashboard, combined with the broker name;
 3. otherwise `"<Broker> (no account number)"`, with an `Account check:` warning when two or more such files
    are still unconfirmed.
@@ -75,6 +80,8 @@ in `ImportService`, by its SHA-256.
   instrument, date and income kind, preferring the same currency; one row shared by several payments is split
   by PLN value and reported. Refunds and corrections net against the original; the credit is capped at the
   treaty rate of the issuer's country (`TreatyWithholdingRates`, by ISIN prefix).
+- `CountryBreakdown` groups sales and income by source country for PIT/ZG: the country the statement names,
+  otherwise the ISIN prefix, otherwise "??". The treaty cap on the credit is not affected by the named country.
 - `PriorYearLossCalculator` checks each entered loss against the five-year window and the per-year limits.
 - `TaxCalculator` runs both calculators and collects the warnings.
 

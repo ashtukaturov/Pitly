@@ -19,4 +19,6 @@ public class TradeResultEntity
     public bool RateUnavailable { get; set; }
     public string? Note { get; set; }
     public string? Isin { get; set; }
+    // Source country named by the statement (generic CSV); null when the country comes from the ISIN
+    public string? CountryCode { get; set; }
 }

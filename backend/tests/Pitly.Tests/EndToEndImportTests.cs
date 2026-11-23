@@ -389,4 +389,108 @@ public class EndToEndImportTests
         Assert.Equal(warning, Assert.Single(reopened.Strings(reopened.Body.GetProperty("dataWarnings"))));
         Assert.False(reopened.Body.GetProperty("needsReimport").GetBoolean());
     }
+
+    // ── 9. Generic CSV templates: any broker, one account per broker column ──
+
+    [Fact]
+    public async Task Import_GenericTemplatesGiveTheFormFieldsAndAttributeInterestByTheNamedCountry()
+    {
+        // The rows of the two template files shipped with the frontend. DEGIRO buys 10 AAPL at 150 USD (6000 PLN)
+        // with a 1.50 USD fee (6 PLN) and sells them at 175 USD (7000 PLN) with a 1.75 USD fee (7 PLN):
+        // przychód 7000, koszty 6013, dochód 987, tax 187.53 -> 188. A 25 USD dividend (100 PLN) has 3.75 USD
+        // (15 PLN) withheld, within the 15% treaty cap. SWISSQUOTE pays 120 EUR of interest (540 PLN) with
+        // 22.80 EUR (102.60 PLN) withheld; without an ISIN the statutory 19% cap applies, which is exactly 102.60.
+        var trades = new GenericTradesCsv()
+            .Buy("DEGIRO", "6B439AA86919", "2024-03-15 10:30:00", "AAPL", Aapl, 10m, 150m, commission: 1.5m)
+            .Sell("DEGIRO", "A178737D90C2", "2024-06-20 14:15:00", "AAPL", Aapl, 10m, 175m, commission: 1.75m);
+        var income = new GenericIncomeCsv()
+            .Dividend("DEGIRO", "6FE97C3181FB", "2024-05-10", "AAPL", Aapl, 25m, 3.75m)
+            .Interest("SWISSQUOTE", "90F820E9CDFD", "2024-12-31", "SAVINGS-EUR", "CH", 120m, 22.80m, "EUR");
+
+        using var app = new PitlyApp();
+        var result = await app.ImportAsync([("generic-trades.csv", trades.Build()), ("generic-income.csv", income.Build())]);
+
+        Assert.Equal(HttpStatusCode.OK, result.Status);
+        Assert.Equal(7000m, result.Field("innePrzychody"));
+        Assert.Equal(6013m, result.Field("inneKoszty"));
+        Assert.Equal(987m, result.Field("dochod"));
+        Assert.Equal(188m, result.Field("podatekNalezny"));                // 19% of 987 = 187.53 -> 188
+        Assert.Equal(121.60m, result.Field("zryczaltowanyPodatek"));       // 19.00 on the dividend + 102.60 on the interest
+        Assert.Equal(117.60m, result.Field("podatekZaplaconyZaGranica"));  // 15.00 + 102.60
+        Assert.Equal(4m, result.Field("roznica"));                         // (19 - 15) -> 4, (102.60 - 102.60) -> 0
+        Assert.Equal(192m, result.Field("podatekDoZaplaty"));
+        Assert.Empty(result.Strings(result.Pit38.GetProperty("dataWarnings")));
+
+        // Every file is attributed to the broker named in its rows; the income file holds two of them.
+        var files = result.Body.GetProperty("files").EnumerateArray()
+            .Select(f => (f.GetProperty("name").GetString(), f.GetProperty("account").GetString(), f.GetProperty("accountKnown").GetBoolean()))
+            .ToList();
+        Assert.Equal(
+            [("generic-trades.csv", "DEGIRO", true), ("generic-income.csv (DEGIRO)", "DEGIRO", true), ("generic-income.csv (SWISSQUOTE)", "SWISSQUOTE", true)],
+            files);
+
+        // PIT/ZG: the interest is attributed to Switzerland because the row names the country, although it has no ISIN.
+        var pitZg = result.Pit38.GetProperty("pitZg").EnumerateArray().ToDictionary(c => c.GetProperty("countryCode").GetString()!);
+        Assert.Equal(["CH", "US"], pitZg.Keys.Order());
+        Assert.Equal(987m, pitZg["US"].GetProperty("incomePln").GetDecimal());
+        Assert.Equal(100m, pitZg["US"].GetProperty("dividendsPln").GetDecimal());
+        Assert.Equal(540m, pitZg["CH"].GetProperty("dividendsPln").GetDecimal());
+        Assert.Equal(102.60m, pitZg["CH"].GetProperty("withholdingPln").GetDecimal());
+
+        // The stored rows keep the country, so a reopened session carries the same attribution.
+        var sessionId = result.Body.GetProperty("sessionId").GetString();
+        var dividends = await app.GetAsync($"/api/session/{sessionId}/dividends");
+        Assert.Equal(HttpStatusCode.OK, dividends.Status);
+        var interest = dividends.Body.EnumerateArray().Single(d => d.GetProperty("kind").GetString() == "Interest");
+        Assert.Equal("CH", interest.GetProperty("countryCode").GetString());
+        var tradesPage = await app.GetAsync($"/api/session/{sessionId}/trades");
+        Assert.All(tradesPage.Body.GetProperty("items").EnumerateArray(), t => Assert.Equal("US", t.GetProperty("countryCode").GetString()));
+    }
+
+    [Fact]
+    public async Task Import_RowsOfDifferentBrokersInOneGenericFileAreSeparateAccounts()
+    {
+        // One file, two brokers: XTB sells the share that only DEGIRO bought. The lot must not cross over.
+        var twoBrokers = new GenericTradesCsv()
+            .Buy("DEGIRO", "1", "2024-01-10 10:00:00", "AAPL", Aapl, 1m, 25m)
+            .Sell("XTB", "2", "2024-02-10 10:00:00", "AAPL", Aapl, 1m, 30m);
+
+        using var app = new PitlyApp();
+        var failed = await app.ImportAsync([("trades.csv", twoBrokers.Build())]);
+
+        Assert.Equal(HttpStatusCode.BadRequest, failed.Status);
+        Assert.Contains("no buy lots available", failed.Error);
+        Assert.Contains("XTB", failed.Error);
+
+        // The same rows under one broker are one account: 120 - 100 = 20 PLN.
+        var oneBroker = new GenericTradesCsv()
+            .Buy("DEGIRO", "1", "2024-01-10 10:00:00", "AAPL", Aapl, 1m, 25m)
+            .Sell("DEGIRO", "2", "2024-02-10 10:00:00", "AAPL", Aapl, 1m, 30m);
+        var result = await app.ImportAsync([("trades.csv", oneBroker.Build())]);
+
+        Assert.Equal(HttpStatusCode.OK, result.Status);
+        Assert.Equal(20m, result.Field("dochod"));
+    }
+
+    [Fact]
+    public async Task Import_GenericRowsRepeatedInASecondFileAreRecognisedByTheirTransactionId()
+    {
+        var full = new GenericTradesCsv()
+            .Buy("DEGIRO", "B1", "2024-01-10 10:00:00", "AAPL", Aapl, 1m, 25m)
+            .Sell("DEGIRO", "S1", "2024-02-10 10:00:00", "AAPL", Aapl, 1m, 30m);
+        // A later export of the same account repeats the sale with the same tx_id.
+        var partial = new GenericTradesCsv()
+            .Sell("DEGIRO", "S1", "2024-02-10 10:00:00", "AAPL", Aapl, 1m, 30m);
+
+        using var app = new PitlyApp();
+        var result = await app.ImportAsync([("full.csv", full.Build()), ("partial.csv", partial.Build())]);
+
+        Assert.Equal(HttpStatusCode.OK, result.Status);
+        Assert.Equal(120m, result.Field("innePrzychody")); // the sale counts once
+        Assert.Equal(20m, result.Field("dochod"));
+        var warnings = result.Strings(result.Summary.GetProperty("warnings"));
+        Assert.Contains(warnings, w => w.StartsWith("'partial.csv' only repeats data already present"));
+        // The broker column names the account, so nothing is "assumed" about the two files.
+        Assert.DoesNotContain(warnings, w => w.StartsWith("Account check:"));
+    }
 }

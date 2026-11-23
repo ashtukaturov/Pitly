@@ -2,12 +2,12 @@ namespace Pitly.Core.Models;
 
 /// <summary>
 /// Income attributed to one foreign country, as needed for the PIT/ZG annex of PIT-38 (section for art. 30b
-/// income: dochód and tax paid abroad per country). The country is the issuer's country taken from the ISIN
-/// prefix. Dividend figures are informational: for PIT-38 they are not entered in PIT/ZG, the foreign
-/// withholding goes straight to poz. 48.
+/// income: dochód and tax paid abroad per country). The country is the one the statement names (generic CSV
+/// "country" column), otherwise the issuer's country taken from the ISIN prefix. Dividend figures are
+/// informational: for PIT-38 they are not entered in PIT/ZG, the foreign withholding goes straight to poz. 48.
 /// </summary>
 public record CountryIncome(
-    // ISO 3166-1 alpha-2 code from the ISIN prefix; "??" when the instrument had no ISIN
+    // ISO 3166-1 alpha-2 code from the statement or the ISIN prefix; "??" when neither is known
     string CountryCode,
     // Country name as written on the Polish form
     string CountryName,

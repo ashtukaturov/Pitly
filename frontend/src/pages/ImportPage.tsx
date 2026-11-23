@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Upload, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, Download, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { describeImportError, importFiles, ImportError } from '../api';
 import type { AppState } from '../types';
 import PriorYearLossesInput from '../components/PriorYearLossesInput';
@@ -8,6 +8,12 @@ import { useT, useLang, type Lang } from '../i18n/index';
 
 // Stable default so the import callback is not rebuilt on every render
 const NO_ACCOUNT_LABELS: Record<string, string> = {};
+
+// Header rows of the generic templates in public/templates; the backend parser reads exactly these names
+const GENERIC_TRADES_COLUMNS =
+  'broker, tx_id, direction, symbol, isin, country, currency, price, quantity, amount, commission, operation_datetime, settlement_date';
+const GENERIC_INCOME_COLUMNS =
+  'broker, tx_id, income_type, symbol, isin, country, currency, gross_amount, wht_amount, operation_datetime, settlement_date';
 
 type Step = 'idle' | 'parsing' | 'rates' | 'calculating' | 'done' | 'error';
 
@@ -277,6 +283,42 @@ export default function ImportPage({
               <p>{t('import.t212Step5')}</p>
               <p>{t('import.t212Step6')}</p>
               <p>{t('import.t212Step7')}</p>
+            </HelpSection>
+            <HelpSection title={t('import.genericTitle')}>
+              <p>{t('import.genericIntro')}</p>
+              <p className="flex flex-wrap gap-4">
+                <a
+                  href="/templates/generic-trades-template.csv"
+                  download
+                  className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  {t('import.genericTradesTemplate')}
+                </a>
+                <a
+                  href="/templates/generic-income-template.csv"
+                  download
+                  className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  {t('import.genericIncomeTemplate')}
+                </a>
+              </p>
+              {/* Column names are part of the format and stay the same in every language */}
+              <p>
+                {t('import.genericColumnsTrades')}
+                <code className="text-slate-300 break-words">{GENERIC_TRADES_COLUMNS}</code>
+              </p>
+              <p>
+                {t('import.genericColumnsIncome')}
+                <code className="text-slate-300 break-words">{GENERIC_INCOME_COLUMNS}</code>
+              </p>
+              <p>{t('import.genericRule1')}</p>
+              <p>{t('import.genericRule2')}</p>
+              <p>{t('import.genericRule3')}</p>
+              <p>{t('import.genericRule4')}</p>
+              <p>{t('import.genericRule5')}</p>
+              <p>{t('import.genericRule6')}</p>
             </HelpSection>
           </div>
         </>

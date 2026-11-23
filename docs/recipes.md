@@ -15,7 +15,11 @@ Step lists for the changes that come up most often. Each list ends with the chec
    - withholding: inside `RawDividend` (`WithheldAmount`, `WithheldCurrency`) when it is printed in the same row
      as the payment, or as separate `RawWithholdingTax` rows when the broker lists it separately;
    - `IncomeKind` for interest and payments in lieu;
+   - `CountryCode` on trades and income rows when the export names the source country (otherwise PIT/ZG uses
+     the ISIN prefix);
    - corporate actions and opening positions when the export has them.
+   When one file can hold several accounts, override `ParseAll` and return one statement per account
+   (`Pitly.Broker.Generic` does this per `broker` value); `Parse` then serves single-account files only.
 3. Teach `StatementParserDispatcher` to recognise the format from the first line, and extend its error message.
 4. Register the parser in `Program.cs`. Reference the project from `Pitly.Api.csproj` and `Pitly.Tests.csproj`.
 5. Add a `COPY` line for the new `.csproj` to `backend/src/Pitly.Api/Dockerfile`, so that the cached restore

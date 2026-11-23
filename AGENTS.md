@@ -6,8 +6,8 @@ this file is the one to keep up to date.
 
 ## What this project is
 
-Pitly turns broker CSV statements (Interactive Brokers, Trading 212) into the values a Polish tax resident enters
-in the PIT-38 return and its PIT/ZG annex. A .NET 10 Minimal API does all the tax arithmetic; a React 19 app
+Pitly turns broker CSV statements (Interactive Brokers, Trading 212, and the generic trades and income templates
+for any other broker) into the values a Polish tax resident enters in the PIT-38 return and its PIT/ZG annex. A .NET 10 Minimal API does all the tax arithmetic; a React 19 app
 uploads the files and shows the result in English, Ukrainian and Polish.
 
 The numbers end up in a real tax return. A change that looks right but is off by one grosz, one field number or
@@ -27,7 +27,8 @@ one account is a bug, so every behaviour below is pinned by a test with a hand-c
    verified form shows field names, never guessed numbers.
 5. **Broker accounts are isolated.** FIFO lots, splits, opening positions, duplicate detection and withholding
    matching all work inside one account; results are summed afterwards. An empty account id does not prove that
-   two files belong to the same account.
+   two files belong to the same account. A generic CSV file may list several brokers: each is its own account and
+   its own statement (`IStatementParser.ParseAll`).
 6. **Three interface languages.** Every translation key exists in `en`, `uk` and `pl`. Polish names of form
    fields stay Polish in every language. Messages produced by the backend are English.
 7. **A tax rule needs a source.** When you change how something is taxed, cite the statute article or the
@@ -79,6 +80,7 @@ backend/
     Services/NbpExchangeRateService.cs  official NBP mid rates
   src/Pitly.Broker.InteractiveBrokers/  IB Activity Statement parser and corporate actions
   src/Pitly.Broker.Trading212/          Trading 212 history export parser
+  src/Pitly.Broker.Generic/             generic trades and income CSV templates (one account per broker column)
   src/Pitly.Api/                        endpoints, import service, SQLite storage, schema upgrade
   tests/Pitly.Tests/                    xUnit: unit tests and end-to-end tests through the real API
 frontend/

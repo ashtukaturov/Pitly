@@ -169,7 +169,8 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                 CreditableWithholdingPln: creditableWithholdingPln,
                 MaxCreditableRate: treatyRate,
                 ExchangeRate: payment.Rate,
-                Isin: div.Isin));
+                Isin: div.Isin,
+                CountryCode: div.CountryCode));
         }
 
         return results;

@@ -48,7 +48,8 @@ public static class EntityMapper
                 GainLossPln = t.GainLossPln,
                 RateUnavailable = t.RateUnavailable,
                 Note = t.Note,
-                Isin = t.Isin
+                Isin = t.Isin,
+                CountryCode = t.CountryCode
             }).ToList(),
             Dividends = summary.Dividends.Select(d => new DividendEntity
             {
@@ -64,7 +65,8 @@ public static class EntityMapper
                 MaxCreditableRate = d.MaxCreditableRate,
                 ExchangeRate = d.ExchangeRate,
                 RateUnavailable = d.RateUnavailable,
-                Isin = d.Isin
+                Isin = d.Isin,
+                CountryCode = d.CountryCode
             }).ToList()
         };
     }

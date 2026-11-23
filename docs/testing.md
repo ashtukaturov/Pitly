@@ -32,6 +32,8 @@ everything visual is checked in the browser.
 | `TaxCalculatorTests.cs`, `ReviewFixesTests.cs` | `Pit38Fields.FromSummary`: rounding, the form layout of each year, years without a verified form. |
 | `StatementMergerTests.cs` | Overlapping and repeated statements. |
 | `InteractiveBrokersStatementParserTests.cs`, `InteractiveBrokersCorporateActionTests.cs`, `Trading212StatementParserTests.cs` | The CSV formats of both brokers. |
+| `GenericCsvStatementParserTests.cs` | The generic trades and income templates: the template rows, one statement per broker, the strict number and date rules, the values accepted for `direction` and `income_type`, the amount check, the country/ISIN check. |
+| `CountryBreakdownTests.cs` | Which country a row goes to in PIT/ZG: the named country, else the ISIN prefix. |
 | `DbSchemaUpgraderTests.cs` | Upgrading a database of an older schema: restored totals, a correct zero left alone, sessions flagged for re-import, a second run changing nothing. |
 | `UploadLimitTests.cs` | The Nginx limit equal to the API limit, Docker ports on `127.0.0.1`, a valid 2 MiB statement accepted, a file above 10 MiB rejected with `file_too_large`. |
 
@@ -47,6 +49,8 @@ everything visual is checked in the browser.
   `Withholding`, `Interest`, `Split`, `OpeningPosition`, `PadTo(bytes)`, `Build()`.
 - **`Trading212Export`** builds a Trading 212 history export: `Buy`, `Sell`, `Dividend` (each with an operation
   id), `Build()`.
+- **`GenericTradesCsv`** and **`GenericIncomeCsv`** build files in the generic templates: `Buy`, `Sell` and
+  `Dividend`, `Interest`, each with the broker (the account) and a `tx_id`, `Build()`.
 - **`TestRateService`** returns fixed rates. A key such as `"USD@2025-05-15"` sets the rate of one day.
 
 ## Writing an end-to-end test
@@ -97,6 +101,7 @@ These came from a review of the tax logic and must keep passing. The inputs are 
 | Dividend 103 PLN, credit 15.10 PLN, year 2025 | 19.57 / 15.10 / 4 in poz. 47 / 48 / 49 | `Import_DividendTaxIsRoundedOnlyInTheDifference` |
 | Full 2024, a 2025 sale without history | 2024 calculates, 2025 offers 2024 | `Import_LaterSaleWithoutHistoryDoesNotBlockTheEarlierYear` |
 | Prior-year losses | poz. 28 for 2024, poz. 30 for 2025 | `Import_PriorYearLossesAreNumberedByTheFormOfTheTaxYear` |
+| The two generic template files (buy 10 at 150 USD + 1.50, sell at 175 + 1.75; dividend 25 USD less 3.75; Swiss interest 120 EUR less 22.80) | 7000 / 6013 / 987, tax 188; flat tax 121.60, paid abroad 117.60, difference 4; interest under CH in PIT/ZG | `Import_GenericTemplatesGiveTheFormFieldsAndAttributeInterestByTheNamedCountry` |
 
 ## Checking the UI by hand
 

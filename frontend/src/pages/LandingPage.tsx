@@ -36,6 +36,7 @@ export default function LandingPage() {
             <span className="text-xs text-slate-500">{t('landing.supports')}</span>
             <span className="text-xs text-slate-400 bg-slate-800 border border-slate-700 rounded-full px-3 py-1">Interactive Brokers</span>
             <span className="text-xs text-slate-400 bg-slate-800 border border-slate-700 rounded-full px-3 py-1">Trading 212</span>
+            <span className="text-xs text-slate-400 bg-slate-800 border border-slate-700 rounded-full px-3 py-1">Generic CSV</span>
           </div>
           <Link
             to="/app"

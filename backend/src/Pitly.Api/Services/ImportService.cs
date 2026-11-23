@@ -55,18 +55,25 @@ public class ImportService : IImportService
             seenContent[hash] = name;
 
             _logger.LogInformation("Parsing statement {Index}/{Count} ({Length} chars)", i + 1, fileStreams.Count, content.Length);
-            var parsed = _parser.Parse(content);
+            // A broker export is one statement. A generic CSV file may list several brokers; each is its own account
+            // and therefore its own statement, named after the file and the broker so that warnings stay readable.
+            var parsedStatements = _parser.ParseAll(content);
             string? label = null;
             accountLabels?.TryGetValue(name, out label);
-            files.Add(new StatementMerger.NamedStatement(name, parsed, label));
-            _logger.LogInformation(
-                "Parsed statement {Index}/{Count}: {Trades} trades, {Dividends} dividends, {Taxes} withholding taxes, {Actions} corporate actions",
-                i + 1,
-                fileStreams.Count,
-                parsed.Trades.Count,
-                parsed.Dividends.Count,
-                parsed.WithholdingTaxes.Count,
-                parsed.CorporateActions?.Count ?? 0);
+            foreach (var parsed in parsedStatements)
+            {
+                var statementName = parsedStatements.Count > 1 ? name + " (" + parsed.Broker + ")" : name;
+                files.Add(new StatementMerger.NamedStatement(statementName, parsed, label));
+                _logger.LogInformation(
+                    "Parsed statement {Index}/{Count} ({Name}): {Trades} trades, {Dividends} dividends, {Taxes} withholding taxes, {Actions} corporate actions",
+                    i + 1,
+                    fileStreams.Count,
+                    statementName,
+                    parsed.Trades.Count,
+                    parsed.Dividends.Count,
+                    parsed.WithholdingTaxes.Count,
+                    parsed.CorporateActions?.Count ?? 0);
+            }
         }
 
         var statements = files.Select(f => f.Statement).ToList();

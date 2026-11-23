@@ -27,7 +27,7 @@ If you invest through a foreign broker from Poland, every year by **April 30** y
 
 **Pitly automates the entire process.** Upload your broker statement CSV and get the exact values to enter in your PIT-38 — in seconds, not hours.
 
-> Supported brokers: **Interactive Brokers** and **Trading 212**.
+> Supported brokers: **Interactive Brokers** and **Trading 212**. Any other broker works through the two **generic CSV templates** (trades and income), the format the PIT-38 assistant uses.
 
 ## Features
 
@@ -117,6 +117,29 @@ npm install && npm run dev
 6. Upload the downloaded file in the app
 7. Upload earlier yearly CSVs together when you need prior-year FIFO history; stock splits are read from the paired "Stock split close" / "Stock split open" rows
 
+### Any other broker: the generic CSV templates
+
+For a broker without a native parser, fill in the two generic templates (the same format the PIT-38 assistant uses) and upload them like a statement. The import page offers them for download; the files are [`frontend/public/templates/generic-trades-template.csv`](frontend/public/templates/generic-trades-template.csv) and [`frontend/public/templates/generic-income-template.csv`](frontend/public/templates/generic-income-template.csv).
+
+```
+broker,tx_id,direction,symbol,isin,country,currency,price,quantity,amount,commission,operation_datetime,settlement_date
+DEGIRO,6B439AA86919,BUY,AAPL,US0378331005,US,USD,150.00,10,1500.00,1.50,2024-03-15 10:30:00,2024-03-17
+```
+
+```
+broker,tx_id,income_type,symbol,isin,country,currency,gross_amount,wht_amount,operation_datetime,settlement_date
+DEGIRO,6FE97C3181FB,DIVIDEND,AAPL,US0378331005,US,USD,25.00,3.75,2024-05-10 00:00:00,2024-05-10
+SWISSQUOTE,90F820E9CDFD,INTEREST,SAVINGS-EUR,,CH,EUR,120.00,22.80,2024-12-31 00:00:00,2024-12-31
+```
+
+- Comma-separated, a dot as the decimal separator and no thousands separator; dates as `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`. Keep the header row; column order does not matter. A value that cannot be read stops the import with the line number
+- `direction` is `BUY` or `SELL`; `income_type` is `DIVIDEND`, `INTEREST` or `PAYMENT_IN_LIEU`. Amounts are positive and in the row's `currency` (`GBX` is converted to GBP): `amount` is the gross value of the trade (filled in from `price` x `quantity` when empty, reported when it disagrees with them), `commission` the fee of that trade, `gross_amount` the payment before tax and `wht_amount` the tax withheld on it
+- `broker` is the account. Rows with the same broker in the trades file and in the income file are one account; different brokers never share FIFO lots or withholding, also inside one file. Two accounts at one broker need two names (`DEGIRO-1`, `DEGIRO-2`)
+- `operation_datetime` is the date of the NBP rate; `settlement_date` is checked for format but not used. `tx_id` lets a repeated or overlapping upload be recognised
+- `country` is the source country for the PIT/ZG annex (needed for interest, which has no ISIN); the treaty cap on the foreign tax credit still follows the ISIN. A country that disagrees with the ISIN prefix is reported, since only a depositary receipt should do that
+- `isin` is optional for trades (lots are then keyed by symbol) and required for nothing else; interest rows may leave `symbol` empty
+- Not covered by the templates: corporate actions, opening positions, reversed or negative payments
+
 A sample IB statement is provided at [`samples/sample-activity-statement.csv`](samples/sample-activity-statement.csv) for testing.
 
 ## How it works
@@ -127,8 +150,8 @@ A sample IB statement is provided at [`samples/sample-activity-statement.csv`](s
 - **Prior-year losses** — enter each earlier PIT-38 loss (year, amount, part already deducted); Pitly checks the 5-year carry-forward window (art. 9 ust. 3), the 50% per-year limit for pre-2019 losses and the 5 000 000 PLN one-off limit, deducts the oldest losses first, caps the total at this year's income and warns about losses that expire unused
 - **Opening-position check** — the lots reconstructed from your uploads are compared with the positions the tax-year statement reports at the start of the year (IB "Prior Quantity"); a mismatch is flagged on the dashboard, which catches a missing year or an unrecognised corporate action
 - **Tax year and residency** — upload every year from your first purchase onwards; the dashboard lets you switch the declared year and set the Polish tax residency start date without re-uploading. A residency date in an earlier year means the whole chosen year is taxable; a date inside the year limits the calculation to sells and dividends from that date. Nothing dated after the end of the chosen year takes part in its calculation, so a later sale with missing purchase history does not block an earlier year (the error then offers the other years found in the upload). Upload the following year too: IB posts withholding-tax corrections there, dated back to the dividend
-- **Overlapping or repeated uploads** — statements can be added in several batches; an identical file is skipped, and rows that another uploaded file of the same broker account already contributed (a partial-year export next to the full year) are skipped and reported, so nothing is counted twice. Rows are recognised by the broker's operation id when the export has one (Trading 212). Withholding-tax corrections that IB books in the following year (dated back to the dividend) net against the original amount, and the total credit never exceeds the tax actually withheld
-- **PIT/ZG annex** — the PIT-38 page lists art. 30b income per issuer country (ISIN prefix): przychod, koszty, dochod to enter in PIT/ZG section C.3 and tax paid abroad, with dividends and withholding by country shown for reference (they are not entered in PIT/ZG; the credit goes to "Podatek zapłacony za granicą" in section G)
+- **Overlapping or repeated uploads** — statements can be added in several batches; an identical file is skipped, and rows that another uploaded file of the same broker account already contributed (a partial-year export next to the full year) are skipped and reported, so nothing is counted twice. Rows are recognised by the broker's operation id when the export has one (Trading 212 `ID`, generic CSV `tx_id`). Withholding-tax corrections that IB books in the following year (dated back to the dividend) net against the original amount, and the total credit never exceeds the tax actually withheld
+- **PIT/ZG annex** — the PIT-38 page lists art. 30b income per source country (the `country` column of a generic CSV file when there is one, otherwise the ISIN prefix): przychod, koszty, dochod to enter in PIT/ZG section C.3 and tax paid abroad, with dividends and withholding by country shown for reference (they are not entered in PIT/ZG; the credit goes to "Podatek zapłacony za granicą" in section G)
 - **Languages** — the interface is available in English, Ukrainian and Polish (switcher on the landing page and in the sidebar; the choice is remembered in the browser). Polish form field names stay Polish in every language because they name fields on the official form; messages generated by the backend (statement warnings, trade notes) are English
 - **Form version by year** — field numbers are shown only for tax years whose form was checked field by field against the Ministry's PDF: PIT-38(15) for 2021, (16) for 2022-2023, (17) for 2024 and (18) for 2025. Versions 15-17 share one numbering; version 18 added a row to section C, which moved "Razem" and every later field by two (prior-year losses are poz. 28 for 2024 and poz. 30 for 2025). For any other year the amounts are still calculated and shown by field name, with a note that the numbering is not verified
 - **Rounding** — following the form and the Ministry's brochure (part G), the flat tax on foreign dividends and the tax paid abroad are entered in zł, gr and only their difference is rounded: to full PLN (art. 63 § 1 O.p.), or up to the grosz for interest (art. 30a ust. 1 pkt 1-3, § 1a). Example: 103 PLN of dividends give 19.57 PLN of tax, 15.10 PLN paid abroad, difference 4.47 → 4 PLN. The Ministry gives no rule for a mix of both streams in the one field; Pitly rounds each stream by its own rule and adds them
@@ -140,7 +163,7 @@ A sample IB statement is provided at [`samples/sample-activity-statement.csv`](s
 - **Sessions saved by an older version** — on start the database is upgraded in place; interest and credit totals are rebuilt from the stored rows when those carry the data, and a session that cannot be rebuilt exactly is flagged for re-import instead of being guessed
 
 - **NBP exchange rates** — for each transaction, the app currently fetches the official mid rate from the last business day before the **trade** date. Rates are cached in memory.
-- **Capital gains (FIFO)** — buy lots are queued per broker account and ISIN (falling back to the ticker when the statement has no ISIN): a purchase on one account is never the cost of a sale on another, and a split reported by two statements changes each account's position once. An IB statement names its account; a Trading 212 export does not, so when several such files are uploaded the dashboard asks which of them belong to one account (until you answer they are treated as one account and a warning says so). On sell, lots are dequeued first-in-first-out to compute cost basis in PLN. Net gains are taxed at 19%.
+- **Capital gains (FIFO)** — buy lots are queued per broker account and ISIN (falling back to the ticker when the statement has no ISIN): a purchase on one account is never the cost of a sale on another, and a split reported by two statements changes each account's position once. An IB statement names its account and a generic CSV file names it in the `broker` column; a Trading 212 export does not, so when several such files are uploaded the dashboard asks which of them belong to one account (until you answer they are treated as one account and a warning says so). On sell, lots are dequeued first-in-first-out to compute cost basis in PLN. Net gains are taxed at 19%.
 - **Dividend tax** — Polish 19% tax minus foreign withholding credit (typically 15% under the PL-US treaty), resulting in ~4% net tax owed.
 
 ## API
@@ -166,6 +189,7 @@ A sample IB statement is provided at [`samples/sample-activity-statement.csv`](s
 - Only **USD** and **EUR** currencies
 - Capital gains are currently calculated using the **trade date**, not the **settlement date**. This is a commonly used and generally safe practical approach for most same-year retail cases, but some stricter interpretations use settlement date instead, especially around year-end and exchange-holiday edge cases. See: [Investor.gov — New T+1 settlement cycle](https://www.investor.gov/newT1settlement-cycle)
 - If you sell a position opened in earlier years, upload those earlier yearly statements too so FIFO cost basis can be reconstructed correctly
+- The generic CSV templates carry no corporate actions and no opening positions: splits, mergers and spin-offs at such a broker have to be reflected in the rows you enter, and the opening-position check does not run for them
 - Losses from previous years are deducted only when you enter them on the import page; Pitly does not read them from earlier returns
 - Does not submit PIT-38 electronically — you enter the values yourself
 - Always verify results and consult a tax advisor if unsure

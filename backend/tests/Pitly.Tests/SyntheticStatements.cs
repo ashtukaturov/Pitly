@@ -156,3 +156,54 @@ internal sealed class Trading212Export
 
     private static string N(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 }
+
+/// <summary>Builds a file in the generic trades template. The broker column is the account.</summary>
+internal sealed class GenericTradesCsv
+{
+    public const string Header =
+        "broker,tx_id,direction,symbol,isin,country,currency,price,quantity,amount,commission,operation_datetime,settlement_date";
+
+    private readonly List<string> _rows = [];
+
+    public GenericTradesCsv Buy(string broker, string id, string dateTime, string symbol, string isin, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? country = null)
+        => Row(broker, id, "BUY", dateTime, symbol, isin, quantity, price, commission, currency, country);
+
+    public GenericTradesCsv Sell(string broker, string id, string dateTime, string symbol, string isin, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? country = null)
+        => Row(broker, id, "SELL", dateTime, symbol, isin, quantity, price, commission, currency, country);
+
+    private GenericTradesCsv Row(string broker, string id, string direction, string dateTime, string symbol, string isin, decimal quantity, decimal price, decimal commission, string currency, string? country)
+    {
+        _rows.Add($"{broker},{id},{direction},{symbol},{isin},{country ?? isin[..2]},{currency},{N(price)},{N(quantity)},{N(price * quantity)},{N(commission)},{dateTime},{dateTime[..10]}");
+        return this;
+    }
+
+    public string Build() => Header + "\n" + string.Join("\n", _rows) + "\n";
+
+    private static string N(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+}
+
+/// <summary>Builds a file in the generic income template: dividends and interest with the tax withheld in the same row.</summary>
+internal sealed class GenericIncomeCsv
+{
+    public const string Header =
+        "broker,tx_id,income_type,symbol,isin,country,currency,gross_amount,wht_amount,operation_datetime,settlement_date";
+
+    private readonly List<string> _rows = [];
+
+    public GenericIncomeCsv Dividend(string broker, string id, string date, string symbol, string isin, decimal gross, decimal withheld, string currency = "USD", string? country = null)
+        => Row(broker, id, "DIVIDEND", date, symbol, isin, country ?? isin[..2], gross, withheld, currency);
+
+    /// <summary>Interest has no ISIN; the country is the one the statement names.</summary>
+    public GenericIncomeCsv Interest(string broker, string id, string date, string symbol, string country, decimal gross, decimal withheld, string currency)
+        => Row(broker, id, "INTEREST", date, symbol, isin: string.Empty, country, gross, withheld, currency);
+
+    private GenericIncomeCsv Row(string broker, string id, string type, string date, string symbol, string isin, string country, decimal gross, decimal withheld, string currency)
+    {
+        _rows.Add($"{broker},{id},{type},{symbol},{isin},{country},{currency},{N(gross)},{N(withheld)},{date} 00:00:00,{date}");
+        return this;
+    }
+
+    public string Build() => Header + "\n" + string.Join("\n", _rows) + "\n";
+
+    private static string N(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+}

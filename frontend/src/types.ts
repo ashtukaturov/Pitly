@@ -16,6 +16,8 @@ export interface TradeResult {
   /** Set on rows created from corporate actions (cash merger, spin-off shares, cash in lieu). */
   note?: string | null;
   isin?: string | null;
+  /** Source country named by the statement (generic CSV); null when PIT/ZG uses the ISIN prefix. */
+  countryCode?: string | null;
 }
 
 /** Flat-tax (art. 30a) income stream. All are taxed at 19% and reported in the same PIT-38 field. */
@@ -38,9 +40,11 @@ export interface DividendResult {
   exchangeRate: number;
   rateUnavailable: boolean;
   isin?: string | null;
+  /** Source country named by the statement (generic CSV); null when PIT/ZG uses the ISIN prefix. */
+  countryCode?: string | null;
 }
 
-/** One PIT/ZG row: income attributed to the issuer country (ISIN prefix). */
+/** One PIT/ZG row: income attributed to the source country (the statement's country column, else the ISIN prefix). */
 export interface CountryIncome {
   countryCode: string;
   countryName: string;
@@ -164,7 +168,7 @@ export interface ImportedFile {
   name: string;
   broker: string | null;
   account: string;
-  /** The statement itself names its account (Interactive Brokers). */
+  /** The statement itself names its account (Interactive Brokers account number, generic CSV broker column). */
   accountKnown: boolean;
   /** The account is named by the statement or was chosen by the user. */
   accountConfirmed: boolean;

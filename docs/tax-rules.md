@@ -120,9 +120,17 @@ not verified. No form for 2026 had been published when this was written.
 
 ## PIT/ZG
 
-Art. 30b income is listed per issuer country (ISIN prefix): przychód, koszty, dochód and tax paid abroad for
-section C.3 of the annex. Dividends and their withholding are shown per country for reference only; they are not
-entered in PIT/ZG.
+Art. 30b income is listed per source country: przychód, koszty, dochód and tax paid abroad for section C.3 of
+the annex. Dividends and their withholding are shown per country for reference only; they are not entered in
+PIT/ZG.
+
+The country of a row is the one the statement names when it has a country column (the generic CSV templates),
+otherwise the issuer's country from the ISIN prefix, otherwise "unknown". The named country only changes where
+the income is listed in PIT/ZG; the treaty cap on the foreign tax credit keeps following the ISIN, and a named
+country that disagrees with the ISIN prefix is reported as a warning (it is correct only for a depositary receipt).
+
+Control example: 120 EUR of Swiss bank interest (540 PLN at 4.50) entered with country `CH` and no ISIN is
+listed under Szwajcaria; without the country column it would fall under "Nieznany kraj (brak ISIN)".
 
 ## Danina solidarnościowa (art. 30h)
 

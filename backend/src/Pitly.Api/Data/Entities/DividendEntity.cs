@@ -17,4 +17,6 @@ public class DividendEntity
     public decimal ExchangeRate { get; set; }
     public bool RateUnavailable { get; set; }
     public string? Isin { get; set; }
+    // Source country named by the statement (generic CSV); null when the country comes from the ISIN
+    public string? CountryCode { get; set; }
 }

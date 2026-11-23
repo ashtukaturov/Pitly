@@ -169,7 +169,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                     CostPln: totalBuyCostPln,
                     GainLossPln: 0,
                     Note: note,
-                    Isin: trade.Isin));
+                    Isin: trade.Isin,
+                    CountryCode: trade.CountryCode));
             }
 
             return;
@@ -227,7 +228,8 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 CostPln: totalCostWithSellCommissionPln,
                 GainLossPln: gainLoss,
                 Note: note,
-                Isin: trade.Isin));
+                Isin: trade.Isin,
+                CountryCode: trade.CountryCode));
         }
     }
 

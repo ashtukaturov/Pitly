@@ -3,7 +3,8 @@ using Pitly.Core.Models;
 namespace Pitly.Core.Tax;
 
 /// <summary>
-/// Groups the tax-period results by the issuer's country (ISIN prefix) for the PIT/ZG annex.
+/// Groups the tax-period results by source country for the PIT/ZG annex: the country the statement names when it
+/// has one (generic CSV "country" column), otherwise the issuer's country from the ISIN prefix.
 /// </summary>
 public static class CountryBreakdown
 {
@@ -66,7 +67,7 @@ public static class CountryBreakdown
 
         foreach (var sale in tradeResults.Where(t => t.Type == TradeType.Sell))
         {
-            var acc = Get(byCountry, sale.Isin);
+            var acc = Get(byCountry, sale.CountryCode, sale.Isin);
             acc.Proceeds += sale.ProceedsPln;
             acc.Cost += sale.CostPln;
             acc.Sales++;
@@ -74,7 +75,7 @@ public static class CountryBreakdown
 
         foreach (var dividend in dividends)
         {
-            var acc = Get(byCountry, dividend.Isin);
+            var acc = Get(byCountry, dividend.CountryCode, dividend.Isin);
             acc.Dividends += dividend.AmountPln;
             acc.Withholding += dividend.WithholdingTaxPln;
             acc.Creditable += dividend.CreditableWithholdingPln;
@@ -106,9 +107,21 @@ public static class CountryBreakdown
             .ToList();
     }
 
-    private static Accumulator Get(Dictionary<string, Accumulator> byCountry, string? isin)
+    /// <summary>
+    /// The country a row is attributed to: the one the statement names, otherwise the ISIN prefix, otherwise
+    /// <see cref="UnknownCountryCode"/>. The treaty cap on the credit is not affected: it follows the ISIN.
+    /// </summary>
+    public static string ResolveCountryCode(string? countryCode, string? isin)
     {
-        var code = TreatyWithholdingRates.GetCountryCode(isin) ?? UnknownCountryCode;
+        var named = countryCode?.Trim();
+        if (!string.IsNullOrEmpty(named) && named.Length == 2 && named.All(char.IsLetter))
+            return named.ToUpperInvariant();
+        return TreatyWithholdingRates.GetCountryCode(isin) ?? UnknownCountryCode;
+    }
+
+    private static Accumulator Get(Dictionary<string, Accumulator> byCountry, string? countryCode, string? isin)
+    {
+        var code = ResolveCountryCode(countryCode, isin);
         if (!byCountry.TryGetValue(code, out var acc))
         {
             acc = new Accumulator();

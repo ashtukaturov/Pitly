@@ -3,6 +3,8 @@ WORKDIR /src
 
 COPY backend/src/Pitly.Core/Pitly.Core.csproj Pitly.Core/
 COPY backend/src/Pitly.Broker.InteractiveBrokers/Pitly.Broker.InteractiveBrokers.csproj Pitly.Broker.InteractiveBrokers/
+COPY backend/src/Pitly.Broker.Trading212/Pitly.Broker.Trading212.csproj Pitly.Broker.Trading212/
+COPY backend/src/Pitly.Broker.Generic/Pitly.Broker.Generic.csproj Pitly.Broker.Generic/
 COPY backend/src/Pitly.Api/Pitly.Api.csproj Pitly.Api/
 RUN dotnet restore Pitly.Api/Pitly.Api.csproj
 

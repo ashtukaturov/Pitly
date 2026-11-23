@@ -17,4 +17,6 @@ public record Dividend(
     decimal ExchangeRate,
     bool RateUnavailable = false,
     // Issuer ISIN, used to attribute the income to a country for PIT/ZG
-    string? Isin = null);
+    string? Isin = null,
+    // Country named by the statement itself; takes precedence over the ISIN prefix for PIT/ZG
+    string? CountryCode = null);

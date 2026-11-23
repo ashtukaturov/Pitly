@@ -14,8 +14,11 @@ public record Trade(
     string? Isin = null,
     // Account whose FIFO queue the trade belongs to; stamped by StatementMerger
     string? AccountId = null,
-    // Broker's own id of the trade (Trading 212 "ID"), used to recognise the same row in overlapping exports
-    string? TransactionId = null);
+    // Broker's own id of the trade (Trading 212 "ID", generic CSV "tx_id"), used to recognise the same row in
+    // overlapping exports
+    string? TransactionId = null,
+    // Source country named by the statement (generic CSV "country"), used for PIT/ZG instead of the ISIN prefix
+    string? CountryCode = null);
 
 public enum TradeType { Buy, Sell }
 
@@ -36,4 +39,6 @@ public record TradeResult(
     // Explains synthetic rows created from corporate actions (cash merger, spin-off shares, cash in lieu)
     string? Note = null,
     // Issuer ISIN, used to attribute the income to a country for PIT/ZG
-    string? Isin = null);
+    string? Isin = null,
+    // Country named by the statement itself; takes precedence over the ISIN prefix for PIT/ZG
+    string? CountryCode = null);

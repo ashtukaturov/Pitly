@@ -31,10 +31,12 @@ public static class DbSchemaUpgrader
         ("Sessions", "NeedsReimport", "INTEGER NOT NULL DEFAULT 0"),
         ("TradeResults", "Note", "TEXT NULL"),
         ("TradeResults", "Isin", "TEXT NULL"),
+        ("TradeResults", "CountryCode", "TEXT NULL"),
         ("Dividends", "Isin", "TEXT NULL"),
         ("Dividends", "Kind", "TEXT NOT NULL DEFAULT 'Dividend'"),
         ("Dividends", "CreditableWithholdingPln", "TEXT NOT NULL DEFAULT '0.0'"),
-        ("Dividends", "MaxCreditableRate", "TEXT NULL")
+        ("Dividends", "MaxCreditableRate", "TEXT NULL"),
+        ("Dividends", "CountryCode", "TEXT NULL")
     ];
 
     public static void EnsureLatestSchema(AppDbContext db)

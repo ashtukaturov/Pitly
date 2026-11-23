@@ -47,7 +47,9 @@ public record RawDividend(
     // Tax withheld on this very payment when the broker reports it in the same row (Trading 212). The link is
     // kept instead of re-matching by date, so two payments of one day cannot swap or share their withholding.
     decimal? WithheldAmount = null,
-    string? WithheldCurrency = null);
+    string? WithheldCurrency = null,
+    // Source country named by the statement (generic CSV "country"), used for PIT/ZG instead of the ISIN prefix
+    string? CountryCode = null);
 
 public record RawWithholdingTax(
     string Symbol,
