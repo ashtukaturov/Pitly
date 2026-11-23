@@ -121,6 +121,9 @@ export interface WithholdingEvent {
   amountPln: number;
   unresolvedAmountPln: number;
   diagnosticCode?: string | null;
+  /** Day the row entered the broker's reports (IB Flex); a later year than the date means a late correction. */
+  reportDate?: string | null;
+  settleDate?: string | null;
 }
 
 /** One uploaded file as the session remembers it: its hash and what it was read as. */

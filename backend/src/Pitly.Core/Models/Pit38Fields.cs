@@ -119,24 +119,50 @@ public record Pit38Fields(
         // So the dividend tax keeps its precision until the difference is taken; rounding it to full PLN before
         // subtracting the foreign tax would overstate the difference (19.57 - 15.10 must give 4, not 20 - 15.10 = 5).
         //
+        // Interest (art. 30a ust. 1 pkt 1-3): art. 63 § 1a O.p. rounds BOTH the base and the tax up to the grosz
+        // ("podstawy opodatkowania ... oraz kwoty podatków od nich pobierane zaokrągla się do pełnych groszy w górę"),
+        // so 0.1051 PLN of interest is a base of 0.11 PLN and a tax of 0.0209 -> 0.03 PLN, not 19% of 0.1051 rounded
+        // up (0.02). The rule is applied per payment: each payment is a separate base from which the payer withholds
+        // (and the taxpayer self-assesses) the tax, so the sum of the per-payment taxes is what the payer would have
+        // withheld. The exact gross stays in the summary for the audit; the rounded base is a separate figure.
+        //
         // The form has a single field for both streams and the Ministry gives no rule for a mix of interest and
         // dividends. Each stream is therefore rounded by its own rule and the two results are added.
+        var interestRows = (summary.Dividends ?? []).Where(d => d.Kind == IncomeKind.Interest).ToList();
         var interestPln = Math.Max(summary.TotalInterestPln, 0m);
         var dividendPln = Math.Max(summary.TotalDividendsPln - interestPln, 0m);
         var interestCreditable = Math.Max(summary.TotalInterestCreditableWithholdingPln, 0m);
         var dividendCreditable = Math.Max(summary.TotalCreditableWithholdingPln - interestCreditable, 0m);
 
         var dividendTax = dividendPln * TaxConstants.TaxRate;
-        var interestTax = RoundToGroszUp(interestPln * TaxConstants.TaxRate);
+
+        // Per interest payment: base rounded up, tax rounded up, credit entered in zł, gr, difference rounded up.
+        // When the rows are not available (a session stored without them) the totals are treated as one payment.
+        var interestPayments = interestRows.Count > 0 && interestRows.Sum(d => d.AmountPln) == summary.TotalInterestPln
+            ? interestRows.Select(d => (Base: Math.Max(d.AmountPln, 0m), Credit: Math.Max(d.CreditableWithholdingPln, 0m))).ToList()
+            : [(Base: interestPln, Credit: interestCreditable)];
+        var interestTax = 0m;
+        var interestCredit = 0m;
+        var interestDifference = 0m;
+        foreach (var (grossBase, creditable) in interestPayments)
+        {
+            var taxOnPayment = RoundToGroszUp(RoundToGroszUp(grossBase) * TaxConstants.TaxRate);
+            var creditOnPayment = RoundToGrosz(Math.Min(creditable, taxOnPayment));
+            interestTax += taxOnPayment;
+            interestCredit += creditOnPayment;
+            interestDifference += RoundToGroszUp(Math.Max(taxOnPayment - creditOnPayment, 0m));
+        }
+
         var zryczaltowanyPodatek = RoundToGrosz(dividendTax) + interestTax;
 
         // Only the treaty-capped (creditable) part of foreign withholding may be entered as tax paid abroad,
-        // and never more than the Polish flat tax on the same stream (art. 30a ust. 9).
+        // and never more than the Polish flat tax on the same stream (art. 30a ust. 9). Every field of the form is
+        // in zł, gr: a converted credit of 0.015 PLN is entered as 0.02 and the difference is taken from the
+        // entered figures, so that the printed fields add up.
         var dividendCredit = Math.Min(dividendCreditable, dividendTax);
-        var interestCredit = Math.Min(interestCreditable, interestTax);
         var podatekZaGranica = Math.Min(RoundToGrosz(dividendCredit) + interestCredit, zryczaltowanyPodatek);
 
-        var roznica = RoundToFullPln(Math.Max(dividendTax - dividendCredit, 0m)) + RoundToGroszUp(Math.Max(interestTax - interestCredit, 0m));
+        var roznica = RoundToFullPln(Math.Max(dividendTax - dividendCredit, 0m)) + interestDifference;
 
         var podatekDoZaplaty = podatekNalezny + roznica;
 

@@ -20,16 +20,19 @@ public enum GenericCsvKind
 /// assistant) for brokers Pitly has no native parser for. The user fills the template by hand or with a script,
 /// so the parser is strict: a value it cannot read with certainty is an error naming the line, never a guess.
 ///
-/// Trades template:   broker,tx_id,direction,symbol,isin,country,currency,price,quantity,amount,commission,operation_datetime,settlement_date
-/// Income template:   broker,tx_id,income_type,symbol,isin,country,currency,gross_amount,wht_amount,operation_datetime,settlement_date
+/// Trades template:   broker,[account_id,]tx_id,direction,symbol,isin,country,currency,price,quantity,amount,commission,operation_datetime,settlement_date
+/// Income template:   broker,[account_id,]tx_id,income_type,symbol,isin,country,currency,gross_amount,wht_amount,operation_datetime,settlement_date
 ///
-/// The <c>broker</c> column is the only account identifier the templates have, so every distinct broker value
-/// becomes its own account (<see cref="ParsedStatement.AccountId"/>): rows of one broker in the trades file and
-/// in the income file belong to one account, rows of two brokers never share FIFO lots or withholding.
+/// Every distinct pair of <c>broker</c> and <c>account_id</c> is its own statement and its own account
+/// (<see cref="ParsedStatement.AccountId"/>): rows of two accounts never share FIFO lots or withholding. The
+/// older template without <c>account_id</c> names only the broker; a broker name is not an account number, so
+/// such a statement carries no account id and the import treats it like any file without one (the user can
+/// label it, and several such files of one broker are reported as an assumption, never merged silently).
 /// </summary>
 public sealed class GenericCsvStatementParser : IStatementParser
 {
     public const string FormatName = "Generic CSV";
+    public const string ParserVersion = "generic-csv/2";
 
     private static readonly string[] DateTimeFormats =
     [
@@ -82,8 +85,8 @@ public sealed class GenericCsvStatementParser : IStatementParser
             return statements[0];
 
         throw new FormatException(
-            $"The file lists {statements.Count} brokers ({string.Join(", ", statements.Select(s => s.Broker))}); " +
-            "each broker is a separate account and has to be parsed as a separate statement.");
+            $"The file lists {statements.Count} accounts ({string.Join(", ", statements.Select(s => s.AccountId is null ? s.Broker : s.Broker + " " + s.AccountId))}); " +
+            "each is a separate account and has to be parsed as a separate statement.");
     }
 
     /// <summary>One statement per distinct <c>broker</c> value, in the order the brokers first appear.</summary>
@@ -118,9 +121,11 @@ public sealed class GenericCsvStatementParser : IStatementParser
                 string.Join(", ", missing.Select(m => "'" + m + "'")) + ".");
         }
 
-        // Rows are grouped by broker; the order of first appearance is kept so that messages read like the file.
-        var brokers = new List<string>();
-        var rowsByBroker = new Dictionary<string, List<(List<string> Fields, int LineNumber)>>(StringComparer.OrdinalIgnoreCase);
+        // Rows are grouped by broker and account; the order of first appearance is kept so that messages read like the file.
+        var hasAccountColumn = columns.ContainsKey("account_id");
+        var groups = new List<(string Broker, string? Account)>();
+        var rowsByGroup = new Dictionary<string, List<(List<string> Fields, int LineNumber)>>(StringComparer.OrdinalIgnoreCase);
+        var accountsByBroker = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         for (var i = 1; i < lines.Count; i++)
         {
@@ -135,34 +140,56 @@ public sealed class GenericCsvStatementParser : IStatementParser
             var lineNumber = i + 1;
             var broker = GetField(fields, columns, "broker")
                 ?? throw new FormatException($"Line {lineNumber}: 'broker' is empty. Every row needs the broker it belongs to.");
+            var account = hasAccountColumn ? GetField(fields, columns, "account_id") : null;
 
-            if (!rowsByBroker.TryGetValue(broker, out var rows))
+            var key = broker + KeySeparator + (account ?? string.Empty);
+            if (!rowsByGroup.TryGetValue(key, out var rows))
             {
                 rows = [];
-                rowsByBroker[broker] = rows;
-                brokers.Add(broker);
+                rowsByGroup[key] = rows;
+                groups.Add((broker, account));
             }
 
             rows.Add((fields, lineNumber));
+
+            if (!accountsByBroker.TryGetValue(broker, out var accounts))
+                accountsByBroker[broker] = accounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            accounts.Add(account ?? string.Empty);
         }
 
-        if (brokers.Count == 0)
+        if (groups.Count == 0)
             throw new FormatException("The generic CSV file has a header but no data rows.");
 
-        var statements = brokers
-            .Select(broker => BuildStatement(kind, broker, rowsByBroker[broker], columns))
+        // A broker whose rows sometimes name an account and sometimes do not cannot be split into accounts with
+        // certainty; the user has to fill the column for every row of that broker.
+        foreach (var (broker, accounts) in accountsByBroker)
+        {
+            if (accounts.Contains(string.Empty) && accounts.Count > 1)
+            {
+                throw new FormatException(
+                    $"Broker {broker}: some rows name an account_id ({string.Join(", ", accounts.Where(a => a.Length > 0))}) and some leave it empty. " +
+                    "Fill account_id for every row of that broker, or leave it empty for all of them.");
+            }
+        }
+
+        var statements = groups
+            .Select(g => BuildStatement(kind, g.Broker, g.Account, rowsByGroup[g.Broker + KeySeparator + (g.Account ?? string.Empty)], columns))
             .ToList();
 
         _logger.LogInformation(
-            "Parsed generic {Kind} CSV: {Brokers} broker(s), {Trades} trades, {Income} income rows",
+            "Parsed generic {Kind} CSV: {Accounts} account(s), {Trades} trades, {Income} income rows",
             kind, statements.Count, statements.Sum(s => s.Trades.Count), statements.Sum(s => s.Dividends.Count));
 
         return statements;
     }
 
+    // Unit separator: cannot occur in a broker name or account id.
+    private const char KeySeparator = (char)31;
+
     private static ParsedStatement BuildStatement(
         GenericCsvKind kind,
         string broker,
+        string? account,
         List<(List<string> Fields, int LineNumber)> rows,
         Dictionary<string, int> columns)
     {
@@ -184,10 +211,11 @@ public sealed class GenericCsvStatementParser : IStatementParser
                 transactionIds[txId] = transactionIds.GetValueOrDefault(txId) + 1;
         }
 
+        var who = account is null ? broker : broker + " " + account;
         foreach (var (txId, count) in transactionIds.Where(kv => kv.Value > 1))
         {
             warnings.Add(
-                $"{broker}: tx_id '{txId}' appears {count} times in the file. All rows were kept; " +
+                $"{who}: tx_id '{txId}' appears {count} times in the file. All rows were kept; " +
                 "check that they are different operations and not the same one listed twice.");
         }
 
@@ -199,9 +227,10 @@ public sealed class GenericCsvStatementParser : IStatementParser
             WithholdingTaxes: [],
             StatementYear: years.Max(),
             Warnings: warnings,
-            // The broker column is the only account identifier the templates have: one broker, one account.
-            AccountId: broker,
-            Broker: broker);
+            // account_id when the template has it; a broker name alone is not an account number.
+            AccountId: account,
+            Broker: broker,
+            ParserVersion: ParserVersion);
     }
 
     private static Trade ParseTrade(Row row, List<string> warnings)
@@ -331,7 +360,8 @@ public sealed class GenericCsvStatementParser : IStatementParser
             TransactionId: row.Get("tx_id"),
             WithheldAmount: withheld > 0 ? withheld : null,
             WithheldCurrency: withheld > 0 ? currency.Code : null,
-            CountryCode: country);
+            CountryCode: country,
+            ClassificationNote: kind == IncomeKind.PaymentInLieu ? IncomeClassification.PaymentInLieuNote : null);
     }
 
     private static string NormalizeIncomeType(string value)

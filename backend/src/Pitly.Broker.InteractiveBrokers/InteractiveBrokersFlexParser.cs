@@ -288,6 +288,11 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
             return;
         }
         var bookingDate = bookingDateTime.Date;
+        // The three dates of a Flex cash row are kept apart: Date/Time is the booking, SettleDate the cash movement,
+        // ReportDate the day the row entered the reports. A correction is dated back to the payment it corrects and
+        // reported on the day it was made, so the report date is the evidence of a late correction.
+        DateTime? settleDate = TryParseFlexDateTime(row.Get("SettleDate"), out var settle) ? settle.Date : null;
+        DateTime? reportDate = TryParseFlexDateTime(row.Get("ReportDate"), out var report) ? report.Date : null;
         if (!TryParseDecimal(row.Get("Amount"), out var amount))
         {
             _logger.LogWarning("Skipping Flex cash row on line {Line}: could not parse amount '{Amount}'", row.LineNumber, row.Get("Amount"));
@@ -307,6 +312,7 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
                     ? IncomeKind.PaymentInLieu
                     : IncomeKind.Dividend;
                 data.Income.Add(new RawDividend(
+                    ClassificationNote: kind == IncomeKind.PaymentInLieu ? IncomeClassification.PaymentInLieuNote : null,
                     Symbol: symbol ?? SymbolFromDescription(description) ?? "?",
                     Currency: currency,
                     Date: bookingDate,
@@ -331,8 +337,10 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
                 }
 
                 var isBond = type.StartsWith("Bond", StringComparison.Ordinal);
+                var lending = IncomeClassification.IsSecuritiesLending(description);
                 data.Income.Add(new RawDividend(
-                    Symbol: isBond && symbol is not null ? symbol : currency + " interest",
+                    ClassificationNote: lending ? IncomeClassification.SecuritiesLendingNote : null,
+                    Symbol: isBond && symbol is not null ? symbol : lending ? currency + " lending income" : currency + " interest",
                     Currency: currency,
                     Date: bookingDate,
                     Amount: amount,
@@ -390,7 +398,9 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
                     BookingDate: bookingDate,
                     SourceStatementYear: bookingDate.Year,
                     RawType: type,
-                    RawDescription: description));
+                    RawDescription: description,
+                    SettleDate: settleDate,
+                    ReportDate: reportDate));
                 return;
             }
             case "Broker Interest Paid":

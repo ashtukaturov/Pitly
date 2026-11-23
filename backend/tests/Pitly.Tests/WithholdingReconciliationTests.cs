@@ -209,8 +209,9 @@ public class WithholdingReconciliationTests
     [Fact]
     public async Task Import_InterestOfOneCentIsNotRoundedBeforeTheTaxIsComputed()
     {
-        // 0.01 EUR at a synthetic fixed rate of 10.51 PLN/EUR = 0.1051 PLN; 19% = 0.019969 PLN -> 0.02 PLN rounded
-        // up to the grosz. Rounding the income to 0.11 PLN first would give 0.0209 -> 0.03 PLN, which is wrong.
+        // 0.01 EUR at a synthetic fixed rate of 10.51 PLN/EUR = 0.1051 PLN. The summary keeps that exact figure.
+        // Recheck P1-07: the earlier expectation of 0.02 PLN (19% of the unrounded gross, rounded up) was wrong.
+        // Art. 63 § 1a O.p. rounds the base up to the grosz as well as the tax: base 0.11, 19% = 0.0209 -> 0.03 PLN.
         // (10.51 is a test rate, not a quotation.)
         var statement = new IbStatement("U1111111", 2025).Interest("2025-01-31", 0.01m, "EUR", "EUR CREDIT INT FOR JAN-2025");
 
@@ -219,14 +220,14 @@ public class WithholdingReconciliationTests
 
         Assert.Equal(HttpStatusCode.OK, result.Status);
         Assert.Equal(0.1051m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
-        Assert.Equal(0.02m, result.Field("zryczaltowanyPodatek"));
-        Assert.Equal(0.02m, result.Field("roznica"));
-        Assert.Equal(0.02m, result.Field("podatekDoZaplaty"));
+        Assert.Equal(0.03m, result.Field("zryczaltowanyPodatek"));
+        Assert.Equal(0.03m, result.Field("roznica"));
+        Assert.Equal(0.03m, result.Field("podatekDoZaplaty"));
 
         // The stored session gives the same figures after a reload.
         var sessionId = result.Body.GetProperty("sessionId").GetString();
         var reopened = await app.GetAsync($"/api/session/{sessionId}/pit38");
-        Assert.Equal(0.02m, reopened.Body.GetProperty("podatekDoZaplaty").GetDecimal());
+        Assert.Equal(0.03m, reopened.Body.GetProperty("podatekDoZaplaty").GetDecimal());
         var summary = await app.GetAsync($"/api/session/{sessionId}/summary");
         Assert.Equal(0.1051m, summary.Body.GetProperty("totalDividendsPln").GetDecimal());
     }

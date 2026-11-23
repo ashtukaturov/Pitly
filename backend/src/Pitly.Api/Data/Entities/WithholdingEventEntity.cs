@@ -28,4 +28,6 @@ public class WithholdingEventEntity
     public decimal AmountPln { get; set; }
     public decimal UnresolvedAmountPln { get; set; }
     public string? DiagnosticCode { get; set; }
+    public DateTime? ReportDate { get; set; }
+    public DateTime? SettleDate { get; set; }
 }

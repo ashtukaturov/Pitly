@@ -40,6 +40,7 @@ public class ImportService : IImportService
         var importWarnings = new List<string>();
         var importDiagnostics = new List<TaxDiagnostic>();
         var seenContent = new Dictionary<string, string>(StringComparer.Ordinal);
+        var usedNames = new HashSet<string>(StringComparer.Ordinal);
         var sourceFiles = new List<SourceFile>();
         var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -48,6 +49,9 @@ public class ImportService : IImportService
             using var reader = new StreamReader(fileStreams[i], leaveOpen: true);
             var content = await reader.ReadToEndAsync();
             var name = fileNames is not null && i < fileNames.Count && !string.IsNullOrWhiteSpace(fileNames[i]) ? fileNames[i] : "file " + (i + 1);
+            // Two uploads with the same file name (the same export of two accounts saved under one name) are told
+            // apart by a suffix, so that account labels and overlap messages point at one file each.
+            name = Distinct(name, usedNames);
 
             // The same file selected twice (or re-uploaded after an error) is skipped before parsing.
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
@@ -69,7 +73,7 @@ public class ImportService : IImportService
             accountLabels?.TryGetValue(name, out label);
             foreach (var parsed in parsedStatements)
             {
-                var statementName = parsedStatements.Count > 1 ? name + " (" + parsed.Broker + ")" : name;
+                var statementName = parsedStatements.Count > 1 ? name + " (" + (parsed.AccountId is null ? parsed.Broker : parsed.Broker + " " + parsed.AccountId) + ")" : name;
                 files.Add(new StatementMerger.NamedStatement(statementName, parsed, label));
                 sourceFiles.Add(new SourceFile(statementName, hash, parsed.Broker, parsed.AccountId, parsed.StatementYear, parsed.ParserVersion));
                 _logger.LogInformation(
@@ -138,6 +142,14 @@ public class ImportService : IImportService
         {
             throw new ImportFailedException(ex.Message, availableYears, attemptedYear, ex);
         }
+    }
+
+    private static string Distinct(string name, HashSet<string> used)
+    {
+        var candidate = name;
+        for (var n = 2; !used.Add(candidate); n++)
+            candidate = name + " (" + n.ToString(CultureInfo.InvariantCulture) + ")";
+        return candidate;
     }
 
     private static ImportedFile DescribeFile(StatementMerger.NamedStatement file, IReadOnlyDictionary<string, string> hashes)

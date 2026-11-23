@@ -64,7 +64,7 @@ public static class SessionEndpoints
 
         group.MapGet("/summary", async (Guid sessionId, AppDbContext db) =>
         {
-            var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);
+            var session = await db.Sessions.Include(s => s.Dividends).FirstOrDefaultAsync(s => s.Id == sessionId);
 
             if (session is null)
                 return Results.NotFound(new { error = "Session not found" });
@@ -74,7 +74,7 @@ public static class SessionEndpoints
 
         group.MapGet("/pit38", async (Guid sessionId, AppDbContext db) =>
         {
-            var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);
+            var session = await db.Sessions.Include(s => s.Dividends).FirstOrDefaultAsync(s => s.Id == sessionId);
 
             if (session is null)
                 return Results.NotFound(new { error = "Session not found" });

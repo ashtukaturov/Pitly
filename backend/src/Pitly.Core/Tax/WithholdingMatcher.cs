@@ -58,10 +58,15 @@ public static class WithholdingMatcher
                 continue;
             }
 
-            // 1. The broker's own link.
+            // 1. The broker's own link. One action id can cover a dividend and the payment in lieu of the same
+            //    distribution; the tax row says which of the two it belongs to, so the candidates are narrowed by
+            //    the kind of income first and the id is never used to spread tax across incompatible kinds.
             if (!string.IsNullOrWhiteSpace(e.ActionId))
             {
-                var byAction = payments.Where(p => SameAccount(p, e) && string.Equals(p.ActionId, e.ActionId, StringComparison.OrdinalIgnoreCase)).ToList();
+                var byActionAnyKind = payments.Where(p => SameAccount(p, e) && string.Equals(p.ActionId, e.ActionId, StringComparison.OrdinalIgnoreCase)).ToList();
+                var byAction = byActionAnyKind.Where(p => SameKind(p, e)).ToList();
+                if (byAction.Count == 0)
+                    byAction = byActionAnyKind;
                 if (byAction.Count == 1)
                 {
                     byPayment[byAction[0]].Links.Add(new Link(e, 1m));

@@ -76,7 +76,11 @@ public record RawDividend(
     // Where the row comes from: the uploaded file (stamped by the import) and the broker's own type and text
     string? SourceFile = null,
     string? RawType = null,
-    string? RawDescription = null);
+    string? RawDescription = null,
+    // Set when the legal classification of the income is not established by the statement: income from lending
+    // out shares (IB "SYEP"), a payment in lieu of a dividend. Such income is in the amounts (as the Kind says) and
+    // carries a blocking finding until the user confirms the classification
+    string? ClassificationNote = null);
 
 /// <summary>
 /// One withholding event as the statement reports it. A positive <see cref="Amount"/> is tax withheld, a
@@ -96,20 +100,50 @@ public record RawWithholdingTax(
     string? ActionId = null,
     // Reference shared with the income it was withheld on (the period of credit interest)
     string? Reference = null,
-    // Day the tax was actually paid or refunded, when the statement gives it (IB Flex "Date/Time")
+    // Day the broker booked the event (IB Flex "Date/Time"), when the statement gives one separate from Date
     DateTime? BookingDate = null,
     // Year of the statement the row was read from; an Activity Statement books next year's corrections dated back
     // to the dividend, so this is the only sign that the money moved in another year
     int? SourceStatementYear = null,
     string? SourceFile = null,
     string? RawType = null,
-    string? RawDescription = null)
+    string? RawDescription = null,
+    // Settlement day of the cash movement (IB Flex "SettleDate"), kept apart from the booking day
+    DateTime? SettleDate = null,
+    // Day the row entered the broker's reports (IB Flex "ReportDate"). A correction dated back to the payment is
+    // reported on the day it was made, often in the next year; this date is evidence of a late correction, not the
+    // day the money moved, so it never sets the exchange rate
+    DateTime? ReportDate = null)
 {
-    /// <summary>The day whose exchange rate values the event (art. 11a ust. 3: the day the tax was paid).</summary>
+    /// <summary>The day whose exchange rate values the event (art. 11a ust. 3: the day the tax was paid or refunded).</summary>
     public DateTime EffectiveDate => BookingDate ?? Date;
 
-    /// <summary>The year the money actually moved, when the statement tells it.</summary>
-    public int? BookingYear => BookingDate?.Year ?? SourceStatementYear;
+    /// <summary>
+    /// The latest year any evidence puts the event in: the booking day, the settlement day, the report day or the
+    /// statement it was read from. A year later than the payment's means a late correction.
+    /// </summary>
+    public int? BookingYear
+    {
+        get
+        {
+            var years = new[] { BookingDate?.Year, SettleDate?.Year, ReportDate?.Year, SourceStatementYear }.Where(y => y is not null).Select(y => y!.Value).ToList();
+            return years.Count == 0 ? null : years.Max();
+        }
+    }
+
+    /// <summary>Which piece of evidence gives <see cref="BookingYear"/>, for the message of a cross-year finding.</summary>
+    public string BookingYearEvidence
+    {
+        get
+        {
+            var year = BookingYear;
+            if (year is null) return "no booking evidence";
+            if (ReportDate?.Year == year && BookingDate?.Year != year) return $"report date {ReportDate:yyyy-MM-dd}";
+            if (SettleDate?.Year == year && BookingDate?.Year != year) return $"settlement date {SettleDate:yyyy-MM-dd}";
+            if (BookingDate?.Year == year) return $"booking date {BookingDate:yyyy-MM-dd}";
+            return $"the {year} statement it was read from";
+        }
+    }
 }
 
 public enum CorporateActionType

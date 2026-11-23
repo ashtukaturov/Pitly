@@ -354,7 +354,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         if (row is null) return;
         var (symbol, isin, currency, date, amount) = row.Value;
         income.Add(new RawDividend(symbol, currency, date, amount, isin, IncomeKind.PaymentInLieu,
-            RawType: "Payment In Lieu Of Dividends", RawDescription: Clean(fields[4])));
+            RawType: "Payment In Lieu Of Dividends", RawDescription: Clean(fields[4]),
+            ClassificationNote: IncomeClassification.PaymentInLieuNote));
     }
 
     private void TryParseInterest(List<string> fields, List<RawDividend> income)
@@ -391,8 +392,10 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             return;
         }
 
-        income.Add(new RawDividend($"{currency} interest", currency, date, amount, null, IncomeKind.Interest,
-            Reference: InterestPeriod(description), RawType: "Interest", RawDescription: description));
+        var lending = IncomeClassification.IsSecuritiesLending(description);
+        income.Add(new RawDividend(lending ? $"{currency} lending income" : $"{currency} interest", currency, date, amount, null, IncomeKind.Interest,
+            Reference: InterestPeriod(description), RawType: "Interest", RawDescription: description,
+            ClassificationNote: lending ? IncomeClassification.SecuritiesLendingNote : null));
     }
 
     private void TryParseWithholdingTax(List<string> fields, List<RawWithholdingTax> taxes)
@@ -463,9 +466,10 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
     private static List<RawDividend> NetDividends(List<RawDividend> dividends)
     {
         return dividends
-            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind, d.Reference))
+            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind, d.Reference, d.ClassificationNote))
             .Select(g => new RawDividend(g.Key.Symbol, g.Key.Currency, g.Key.Date, g.Sum(d => d.Amount), g.Key.Isin, g.Key.Kind,
-                Reference: g.Key.Reference, RawType: g.First().RawType, RawDescription: Descriptions(g.Select(d => d.RawDescription))))
+                Reference: g.Key.Reference, RawType: g.First().RawType, RawDescription: Descriptions(g.Select(d => d.RawDescription)),
+                ClassificationNote: g.Key.ClassificationNote))
             .Where(d => d.Amount > 0)
             .ToList();
     }

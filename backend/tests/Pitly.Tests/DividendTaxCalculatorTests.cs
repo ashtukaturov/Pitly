@@ -112,8 +112,11 @@ public class DividendTaxCalculatorTests
     }
 
     [Fact]
-    public async Task CalculateAsync_FallsBackToStatutoryCapWithoutTreatyRate()
+    public async Task CalculateAsync_DoesNotCreditForeignTaxWhoseTreatyCapIsUnknown()
     {
+        // Recheck P2-08. This test used to expect the statutory 19% cap whenever no treaty rate was on file. An
+        // unknown rate is not a licence to apply another method: under the treaty cap such tax is not credited and
+        // the result is blocked with the reason, so that the user verifies the rate or chooses the statutory cap.
         var rateService = new TestRateService(new Dictionary<string, decimal>
         {
             ["USD"] = 1m
@@ -136,11 +139,12 @@ public class DividendTaxCalculatorTests
         var results = await calculator.CalculateAsync(dividends, withholdingTaxes);
 
         var noIsin = Assert.Single(results, d => d.Symbol == "XYZ");
-        Assert.Equal(19m, noIsin.CreditableWithholdingPln);
+        Assert.Equal(0m, noIsin.CreditableWithholdingPln);
+        Assert.Equal(25m, noIsin.WithholdingTaxPln);   // the tax itself is still shown
         Assert.Null(noIsin.MaxCreditableRate);
 
         var bermuda = Assert.Single(results, d => d.Symbol == "BMCO");
-        Assert.Equal(10m, bermuda.CreditableWithholdingPln);
+        Assert.Equal(0m, bermuda.CreditableWithholdingPln);   // no treaty rate on file for BM: not credited, reported
         Assert.Null(bermuda.MaxCreditableRate);
     }
 

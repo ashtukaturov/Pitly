@@ -66,17 +66,17 @@ public class WithholdingAttributionTests
     {
         var dividends = new List<RawDividend>
         {
-            new("XYZ", "USD", Day, 100m),
-            new("XYZ", "EUR", Day, 100m)
+            new("XYZ", "USD", Day, 100m, "US0000000001"),
+            new("XYZ", "EUR", Day, 100m, "US0000000001")
         };
-        var taxes = new List<RawWithholdingTax> { new("XYZ", "EUR", Day, 10m) };
+        var taxes = new List<RawWithholdingTax> { new("XYZ", "EUR", Day, 10m, "US0000000001") };
         var warnings = new List<string>();
 
         var results = await NewCalculator().CalculateAsync(dividends, taxes, warnings);
 
         Assert.Equal(0m, results[0].WithholdingTaxPln);
         Assert.Equal(50m, results[1].WithholdingTaxPln);
-        Assert.Empty(warnings);
+        Assert.Empty(warnings);   // with a known treaty rate nothing is left to report
     }
 
     [Fact]

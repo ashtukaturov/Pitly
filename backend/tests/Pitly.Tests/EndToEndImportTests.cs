@@ -438,12 +438,14 @@ public class EndToEndImportTests
         Assert.Equal(192m, result.Field("podatekDoZaplaty"));
         Assert.Empty(result.Strings(result.Pit38.GetProperty("dataWarnings")));
 
-        // Every file is attributed to the broker named in its rows; the income file holds two of them.
+        // Every file is attributed to the broker named in its rows; the income file holds two of them. Recheck P1-01:
+        // the template has no account_id column, so the broker name is not a known account number; a trades file and
+        // an income file of one broker share no rows, so nothing is assumed about them either.
         var files = result.Body.GetProperty("files").EnumerateArray()
             .Select(f => (f.GetProperty("name").GetString(), f.GetProperty("account").GetString(), f.GetProperty("accountKnown").GetBoolean()))
             .ToList();
         Assert.Equal(
-            [("generic-trades.csv", "DEGIRO", true), ("generic-income.csv (DEGIRO)", "DEGIRO", true), ("generic-income.csv (SWISSQUOTE)", "SWISSQUOTE", true)],
+            [("generic-trades.csv", "DEGIRO (no account number)", false), ("generic-income.csv (DEGIRO)", "DEGIRO (no account number)", false), ("generic-income.csv (SWISSQUOTE)", "SWISSQUOTE (no account number)", false)],
             files);
 
         // PIT/ZG: the interest is attributed to Switzerland because the row names the country, although it has no ISIN.
@@ -507,7 +509,8 @@ public class EndToEndImportTests
         Assert.Equal(20m, result.Field("dochod"));
         var warnings = result.Strings(result.Summary.GetProperty("warnings"));
         Assert.Contains(warnings, w => w.StartsWith("'partial.csv' only repeats data already present"));
-        // The broker column names the account, so nothing is "assumed" about the two files.
-        Assert.DoesNotContain(warnings, w => w.StartsWith("Account check:"));
+        // Recheck P1-01: two trade files of one broker without an account_id are assumed to be one account, and that
+        // assumption is reported (it used to pass silently because the broker name counted as an account number).
+        Assert.Contains(warnings, w => w.StartsWith("Account check:"));
     }
 }

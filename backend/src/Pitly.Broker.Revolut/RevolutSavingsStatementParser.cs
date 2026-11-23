@@ -25,7 +25,7 @@ namespace Pitly.Broker.Revolut;
 public sealed partial class RevolutSavingsStatementParser : IStatementParser
 {
     public const string BrokerName = "Revolut";
-    public const string ParserVersion = "revolut-savings-csv/1";
+    public const string ParserVersion = "revolut-savings-csv/2";
 
     private readonly ILogger<RevolutSavingsStatementParser> _logger;
 
@@ -74,7 +74,7 @@ public sealed partial class RevolutSavingsStatementParser : IStatementParser
         var summaryByCurrency = new Dictionary<string, (decimal Interest, int Line)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var section in sections.Where(s => s.Kind == SectionKind.Transactions))
-            ParseTransactions(section, income, withholding, unknownTypes, interestByCurrency, warnings);
+            ParseTransactions(section, income, withholding, unknownTypes, interestByCurrency, warnings, diagnostics);
 
         foreach (var section in sections.Where(s => s.Kind == SectionKind.Summary))
             ParseSummary(section, summaryByCurrency);
@@ -169,17 +169,23 @@ public sealed partial class RevolutSavingsStatementParser : IStatementParser
         List<RawWithholdingTax> withholding,
         Dictionary<string, int> unknownTypes,
         Dictionary<string, decimal> interestByCurrency,
-        List<string> warnings)
+        List<string> warnings,
+        List<TaxDiagnostic> diagnostics)
     {
         var dateIndex = FindColumn(section.Header, "date");
         var descriptionIndex = FindColumn(section.Header, "description", "details", "type");
         var typeIndex = FindColumn(section.Header, "type");
-        var amountIndex = FindColumn(section.Header, "amount", "value", "money");
         var currencyIndex = FindColumn(section.Header, "currency");
-        if (dateIndex < 0 || amountIndex < 0 || descriptionIndex < 0)
+        // Either one signed "Amount" column, or the pair "Money in" / "Money out" where the side that does not
+        // apply to a row is left empty. An empty opposite side is not an unreadable number.
+        var moneyInIndex = FindColumn(section.Header, "money in", "paid in", "credit");
+        var moneyOutIndex = FindColumn(section.Header, "money out", "paid out", "debit");
+        var amountIndex = moneyInIndex >= 0 && moneyOutIndex >= 0 ? -1 : FindColumn(section.Header, "amount", "value", "money");
+        var hasPair = moneyInIndex >= 0 && moneyOutIndex >= 0;
+        if (dateIndex < 0 || descriptionIndex < 0 || (amountIndex < 0 && !hasPair))
         {
             throw new FormatException(
-                $"Line {section.Line}: the Revolut transactions section for {section.Currency} has no recognisable Date, Description and Amount columns " +
+                $"Line {section.Line}: the Revolut transactions section for {section.Currency} has no recognisable Date, Description and Amount (or Money in / Money out) columns " +
                 $"(header: {string.Join(", ", section.Header)}).");
         }
 
@@ -189,24 +195,62 @@ public sealed partial class RevolutSavingsStatementParser : IStatementParser
             index++;
             var description = Field(fields, descriptionIndex);
             var type = typeIndex >= 0 ? Field(fields, typeIndex) : description;
-            var amountRaw = Field(fields, amountIndex);
             var currency = currencyIndex >= 0 && Field(fields, currencyIndex).Length == 3 ? Field(fields, currencyIndex).ToUpperInvariant() : section.Currency;
 
             if (!TryParseDate(Field(fields, dateIndex), out var date))
                 throw new FormatException($"Line {line}: the date '{Field(fields, dateIndex)}' of a Revolut transaction could not be read.");
 
-            if (!TryParseMoney(amountRaw, out var amount, out var amountCurrency))
-                throw new FormatException($"Line {line}: the amount '{amountRaw}' of a Revolut transaction could not be read.");
+            // The row is classified before its amount is read: a deposit, a withdrawal or a balance line is the
+            // user's own money and needs no amount; only income and tax rows must carry a readable figure.
+            var rowKind = Classify(type, description);
+            var label = (type + " " + description).Trim();
+            if (rowKind == RowKind.Movement)
+                continue;
+            if (rowKind == RowKind.Unknown)
+            {
+                unknownTypes[label] = unknownTypes.GetValueOrDefault(label) + 1;
+                continue;
+            }
+
+            decimal amount;
+            string? amountCurrency;
+            if (hasPair)
+            {
+                var inRaw = Field(fields, moneyInIndex);
+                var outRaw = Field(fields, moneyOutIndex);
+                var hasIn = inRaw.Length > 0;
+                var hasOut = outRaw.Length > 0;
+                if (!hasIn && !hasOut)
+                    throw new FormatException($"Line {line}: the Revolut {(rowKind == RowKind.Tax ? "tax" : "interest")} row has neither 'Money in' nor 'Money out'.");
+                decimal moneyIn = 0m, moneyOut = 0m;
+                string? inCurrency = null, outCurrency = null;
+                if (hasIn && !TryParseMoney(inRaw, out moneyIn, out inCurrency))
+                    throw new FormatException($"Line {line}: the amount '{inRaw}' of a Revolut transaction could not be read.");
+                if (hasOut && !TryParseMoney(outRaw, out moneyOut, out outCurrency))
+                    throw new FormatException($"Line {line}: the amount '{outRaw}' of a Revolut transaction could not be read.");
+                amount = Math.Abs(moneyIn) - Math.Abs(moneyOut);
+                amountCurrency = inCurrency ?? outCurrency;
+            }
+            else
+            {
+                var amountRaw = Field(fields, amountIndex);
+                if (!TryParseMoney(amountRaw, out amount, out amountCurrency))
+                    throw new FormatException($"Line {line}: the amount '{amountRaw}' of a Revolut transaction could not be read.");
+            }
             if (amountCurrency is not null)
                 currency = amountCurrency;
 
-            var label = (type + " " + description).Trim();
-            switch (Classify(type, description))
+            switch (rowKind)
             {
                 case RowKind.Interest:
                     if (amount <= 0m)
                     {
-                        warnings.Add($"Line {line}: an interest row of {N(amount)} {currency} is not positive and was left out.");
+                        // A negative "interest" row is a correction Pitly cannot apply with certainty (to which
+                        // payment, in which year); the income is left as the positive rows say and the result is blocked.
+                        var message = $"Line {line}: an interest row of {N(amount)} {currency} ('{label}') is not positive. It was left out of the income; " +
+                                      "a reversal or correction of interest has to be applied by hand to the payment it corrects.";
+                        warnings.Add(message);
+                        diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.UnsupportedRow, DiagnosticSeverity.Warning, message, AffectedYears: [date.Year], AffectsAmounts: true));
                         break;
                     }
 
@@ -237,24 +281,39 @@ public sealed partial class RevolutSavingsStatementParser : IStatementParser
                         RawType: type,
                         RawDescription: description));
                     break;
-                case RowKind.Movement:
-                    break;
-                default:
-                    unknownTypes[label] = unknownTypes.GetValueOrDefault(label) + 1;
-                    break;
             }
         }
     }
 
+    /// <summary>
+    /// The summary comes in two layouts: a horizontal table (a header naming "Interest earned" and one row of
+    /// values) and vertical label/value pairs ("Total interest earned,100 PLN", one per line, no header). In the
+    /// vertical layout the first line of the section is a pair too, not a header.
+    /// </summary>
     private static void ParseSummary(Section section, Dictionary<string, (decimal Interest, int Line)> summaryByCurrency)
     {
         var interestIndex = FindColumn(section.Header, "interest");
-        if (interestIndex < 0)
-            return;
-
-        foreach (var (fields, line) in section.Rows)
+        if (interestIndex >= 0 && section.Header.Count > 2)
         {
-            if (TryParseMoney(Field(fields, interestIndex), out var interest, out var currency))
+            foreach (var (fields, line) in section.Rows)
+            {
+                if (TryParseMoney(Field(fields, interestIndex), out var interest, out var currency))
+                    summaryByCurrency[currency ?? section.Currency] = (summaryByCurrency.GetValueOrDefault(currency ?? section.Currency).Interest + interest, line);
+            }
+
+            return;
+        }
+
+        var pairs = new List<(List<string> Fields, int Line)> { (section.Header, section.Line + 1) };
+        pairs.AddRange(section.Rows);
+        foreach (var (fields, line) in pairs)
+        {
+            if (fields.Count < 2)
+                continue;
+            var labelText = Clean(fields[0]);
+            if (!labelText.Contains("interest", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (TryParseMoney(Clean(fields[1]), out var interest, out var currency))
                 summaryByCurrency[currency ?? section.Currency] = (summaryByCurrency.GetValueOrDefault(currency ?? section.Currency).Interest + interest, line);
         }
     }
@@ -279,6 +338,13 @@ public sealed partial class RevolutSavingsStatementParser : IStatementParser
     {
         foreach (var name in names)
         {
+            // An exact name first ("Type" must not be taken for "Description"), then a column containing it.
+            for (var i = 0; i < header.Count; i++)
+            {
+                if (header[i].Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+
             for (var i = 0; i < header.Count; i++)
             {
                 if (header[i].Contains(name, StringComparison.OrdinalIgnoreCase))
@@ -398,6 +464,6 @@ public sealed partial class RevolutSavingsStatementParser : IStatementParser
     [GeneratedRegex(@"(?<![A-Za-z])(?<code>EUR|USD|GBP|PLN|CHF|CZK|HUF|RON|SEK|NOK|DKK)(?![A-Za-z])", RegexOptions.IgnoreCase)]
     private static partial Regex CurrencyCodeRegex();
 
-    [GeneratedRegex(@"\b(deposit\w*|top[- ]?up\w*|withdraw\w*|transfer\w*|added|moved|balance|opening|closing|fee\w*)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(deposit\w*|top[- ]?up\w*|withdraw\w*|transfer\w*|added|moved|balance|opening|closing|fee\w*|saving\w*\s+(in|out)|funds?\s+(in|out))\b", RegexOptions.IgnoreCase)]
     private static partial Regex MovementRegex();
 }

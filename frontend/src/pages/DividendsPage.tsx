@@ -206,13 +206,16 @@ function WithholdingEvents({ events }: { events: WithholdingEvent[] }) {
             </thead>
             <tbody>
               {events.map((e, i) => {
-                const bookedElsewhere = e.sourceStatementYear != null && e.sourceStatementYear !== new Date(e.date).getFullYear();
+                const eventYear = new Date(e.date).getFullYear();
+                const bookedElsewhere = e.sourceStatementYear != null && e.sourceStatementYear !== eventYear;
+                const reportedLater = e.reportDate != null && new Date(e.reportDate).getFullYear() !== eventYear;
                 const codeKey = e.diagnosticCode ? `diag.code.${e.diagnosticCode}` : null;
                 return (
                   <tr key={i} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                     <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">
                       {formatDate(e.date)}
                       {bookedElsewhere && <span className="block text-xs text-amber-400">{t('events.booked', { year: e.sourceStatementYear ?? '' })}</span>}
+                      {reportedLater && <span className="block text-xs text-amber-400">{t('events.reported', { date: formatDate(e.reportDate!) })}</span>}
                     </td>
                     <td className="px-3 py-2.5">
                       <span className="text-white font-medium">{e.symbol}</span>

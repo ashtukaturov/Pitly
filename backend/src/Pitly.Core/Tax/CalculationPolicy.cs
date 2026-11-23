@@ -37,11 +37,13 @@ public sealed record RoundingPolicy(
     IReadOnlyList<string> Sources)
 {
     public static readonly RoundingPolicy Current = new(
-        Version: "2025.1",
+        Version: "2025.2",
         DividendRule:
             "19% of the dividends is entered in zl, gr; the tax paid abroad is entered in zl, gr; only their difference is rounded to full PLN (art. 63 par. 1 Ordynacji podatkowej).",
         InterestRule:
-            "19% of the interest is rounded up to the grosz (art. 63 par. 1a Ordynacji podatkowej for art. 30a ust. 1 pkt 1-3), and so is the difference after the tax paid abroad.",
+            "For each interest payment the base in PLN is rounded up to the grosz, 19% of it is rounded up to the grosz (art. 63 par. 1a Ordynacji podatkowej for art. 30a ust. 1 pkt 1-3), " +
+            "the tax paid abroad on it is entered in zl, gr, and the difference is rounded up to the grosz; the per-payment figures are added. " +
+            "Rounding per payment rather than on the yearly total is Pitly's reading (each payment is a separate base).",
         MixedRule:
             "When one return holds both dividends and interest, each stream is rounded by its own rule and the two results are added. The form has one field for both and the Ministry gives no rule for the mix.",
         MixedRuleIsAssumption: true,
@@ -57,5 +59,5 @@ public sealed record RoundingPolicy(
 public static class RuleVersions
 {
     /// <summary>Changes whenever the matching of withholding, the rounding or the credit rules change.</summary>
-    public const string Rules = "2025.1";
+    public const string Rules = "2025.2";
 }

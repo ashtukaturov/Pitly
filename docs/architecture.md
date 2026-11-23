@@ -77,11 +77,11 @@ the same files again with different options and replaces the result.
 
 Each uploaded file is resolved to one account:
 
-1. the account number in the statement (IB prints it; a generic CSV file names the broker, which is its
-   account), upper-cased;
+1. the account number in the statement (IB prints it; a generic CSV file carries it in `account_id`, and a
+   broker name alone is not one), upper-cased;
 2. otherwise the label the user chose for that file on the dashboard, combined with the broker name;
-3. otherwise `"<Broker> (no account number)"`, with an `Account check:` warning when two or more such files
-   are still unconfirmed.
+3. otherwise `"<Broker> (no account number)"`, with an `Account check:` warning (`ACCOUNT_ASSUMED`, blocking)
+   when two or more such files that both hold trades, or both hold income, are still unconfirmed.
 
 Rows are then stamped with that account and with the file they came from. Duplicates are detected only inside
 one account. Two rows that both carry the broker's operation id are the same row only when the ids are equal; a
@@ -90,7 +90,18 @@ that earlier row had an id, so an event uploaded once as an Activity Statement r
 is counted once whichever file comes first. When the same content appears M times in a new file and N times in
 files already merged, `max(0, M − N)` copies are taken, so a repeated or overlapping export adds nothing and two
 genuinely identical trades in one file are both kept. A byte-identical file is skipped earlier, in
-`ImportService`, by its SHA-256. The merger also produces diagnostics (`OVERLAP_SKIPPED`, `ACCOUNT_ASSUMED`).
+`ImportService`, by its SHA-256; two uploads with the same file name are told apart by a suffix.
+
+Two formats of one account describe the same operations at different levels: the Activity Statement shows an
+order and nets the withholding rows of a day, the Flex Query lists executions and single tax rows. After the
+row-level comparison, `ReconcileAcrossFormats` compares the rows the row-level step did not recognise, one
+instrument, day and side at a time, with what files of the other format family (`ParserVersion` before the
+slash) of the same account contributed: a subset of the new rows whose quantity, amount and fees add up to one
+other-format file's rows, to one other-format row, or to the other format's rows booked in this file's year is
+the same operations and is skipped (subsets are enumerated for groups of up to twelve rows). Rows left over are
+kept unless the other format already covers them, that is has a file for the row's booking year whose rows of
+that kind span the row's date; then they are a `SOURCE_CONFLICT` (blocking): left out so that nothing is doubled,
+and reported with both figures. The merger also produces `OVERLAP_SKIPPED` and `ACCOUNT_ASSUMED`.
 
 ## Tax calculation (`Pitly.Core/Tax`)
 

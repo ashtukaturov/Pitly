@@ -20,9 +20,10 @@ internal sealed class IbFlexCsv
     private readonly List<string> _trades = [];
     private readonly List<string> _cash = [];
     private readonly List<string> _actions = [];
-    private int _nextId = 1000;
+    // Shared by every builder so that two files of one test never repeat an id, as IB's ids never repeat.
+    private static int _nextId = 1000;
 
-    private string NextId() => (_nextId++).ToString(CultureInfo.InvariantCulture);
+    private static string NextId() => Interlocked.Increment(ref _nextId).ToString(CultureInfo.InvariantCulture);
 
     /// <param name="dateTime">"yyyyMMdd;HHmmss" as the export writes it.</param>
     public IbFlexCsv Buy(string account, string symbol, string isin, string dateTime, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? tradeId = null)
@@ -51,6 +52,16 @@ internal sealed class IbFlexCsv
     {
         _cash.Add(Q(account, currency, "STK", symbol, isin, isin[..2], date + ";202000", date, date, N(-withheld), "Withholding Tax", transactionId ?? NextId(), actionId,
             $"{symbol}({isin}) CASH DIVIDEND {currency} 0.25 PER SHARE - {isin[..2]} TAX", "DETAIL"));
+        return this;
+    }
+
+    /// <summary>
+    /// One Cash Transactions row written field by field: the type, the three dates and the description exactly as
+    /// given, for rows the other builders do not produce (a payment in lieu, a refund reported in a later year).
+    /// </summary>
+    public IbFlexCsv CashRow(string account, string symbol, string isin, string dateTime, string settleDate, string reportDate, decimal amount, string type, string description, string actionId = "", string? transactionId = null, string currency = "USD")
+    {
+        _cash.Add(Q(account, currency, symbol.Length == 0 ? "CASH" : "STK", symbol, isin, isin.Length >= 2 ? isin[..2] : "", dateTime, settleDate, reportDate, N(amount), type, transactionId ?? NextId(), actionId, description, "DETAIL"));
         return this;
     }
 

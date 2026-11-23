@@ -1,3 +1,3 @@
-broker,tx_id,direction,symbol,isin,country,currency,price,quantity,amount,commission,operation_datetime,settlement_date
-DEGIRO,6B439AA86919,BUY,AAPL,US0378331005,US,USD,150.00,10,1500.00,1.50,2024-03-15 10:30:00,2024-03-17
-DEGIRO,A178737D90C2,SELL,AAPL,US0378331005,US,USD,175.00,10,1750.00,1.75,2024-06-20 14:15:00,2024-06-22
+broker,account_id,tx_id,direction,symbol,isin,country,currency,price,quantity,amount,commission,operation_datetime,settlement_date
+DEGIRO,12345,6B439AA86919,BUY,AAPL,US0378331005,US,USD,150.00,10,1500.00,1.50,2024-03-15 10:30:00,2024-03-17
+DEGIRO,12345,A178737D90C2,SELL,AAPL,US0378331005,US,USD,175.00,10,1750.00,1.75,2024-06-20 14:15:00,2024-06-22

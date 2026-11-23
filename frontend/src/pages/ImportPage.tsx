@@ -11,9 +11,9 @@ const NO_ACCOUNT_LABELS: Record<string, string> = {};
 
 // Header rows of the generic templates in public/templates; the backend parser reads exactly these names
 const GENERIC_TRADES_COLUMNS =
-  'broker, tx_id, direction, symbol, isin, country, currency, price, quantity, amount, commission, operation_datetime, settlement_date';
+  'broker, account_id, tx_id, direction, symbol, isin, country, currency, price, quantity, amount, commission, operation_datetime, settlement_date';
 const GENERIC_INCOME_COLUMNS =
-  'broker, tx_id, income_type, symbol, isin, country, currency, gross_amount, wht_amount, operation_datetime, settlement_date';
+  'broker, account_id, tx_id, income_type, symbol, isin, country, currency, gross_amount, wht_amount, operation_datetime, settlement_date';
 
 type Step = 'idle' | 'parsing' | 'rates' | 'calculating' | 'done' | 'error';
 

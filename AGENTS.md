@@ -28,8 +28,10 @@ one account is a bug, so every behaviour below is pinned by a test with a hand-c
    verified form shows field names, never guessed numbers.
 5. **Broker accounts are isolated.** FIFO lots, splits, opening positions, duplicate detection and withholding
    matching all work inside one account; results are summed afterwards. An empty account id does not prove that
-   two files belong to the same account. A generic CSV file may list several brokers: each is its own account and
-   its own statement (`IStatementParser.ParseAll`).
+   two files belong to the same account, and a broker name is not an account number. A generic CSV file may list
+   several brokers and accounts (`broker` + `account_id`): each pair is its own account and its own statement
+   (`IStatementParser.ParseAll`). Two IB formats of one account are reconciled as sets of rows, never doubled;
+   where they disagree the result is blocked (`SOURCE_CONFLICT`).
 6. **Three interface languages.** Every translation key exists in `en`, `uk` and `pl`. Polish names of form
    fields stay Polish in every language. Messages produced by the backend are English.
 7. **A tax rule needs a source.** When you change how something is taxed, cite the statute article or the

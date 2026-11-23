@@ -103,7 +103,9 @@ public static class EntityMapper
                 MatchedPayment = e.MatchedPayment,
                 AmountPln = e.AmountPln,
                 UnresolvedAmountPln = e.UnresolvedAmountPln,
-                DiagnosticCode = e.DiagnosticCode
+                DiagnosticCode = e.DiagnosticCode,
+                ReportDate = e.ReportDate,
+                SettleDate = e.SettleDate
             }).ToList()
         };
     }
@@ -127,7 +129,9 @@ public static class EntityMapper
             session.TotalCreditableWithholdingPln,
             session.DividendTaxOwedPln, session.Year,
             taxPeriod.TaxableFrom, taxPeriod.TaxableTo,
-            [], [],
+            // The stored income rows, when the caller loaded them: section G rounds interest per payment, so the
+            // rows are needed to give back exactly the fields of the import (an empty list falls back to the totals).
+            [], session.Dividends.Select(ToDividend).ToList(),
             PriorYearLossJson.Deserialize(session.PriorYearLossesJson),
             Warnings: warnings,
             Countries: DeserializeCountries(session.CountriesJson),
@@ -143,7 +147,17 @@ public static class EntityMapper
             SourceFiles: Deserialize<List<SourceFile>>(session.SourceFilesJson));
     }
 
-    /// <summary>PIT-38 of a stored session: the same calculation as right after the import.</summary>
+    public static Dividend ToDividend(DividendEntity d) => new(
+        d.Symbol, d.Currency, d.Date,
+        Enum.TryParse<IncomeKind>(d.Kind, out var kind) ? kind : IncomeKind.Dividend,
+        d.AmountOriginal, d.WithholdingTaxOriginal, d.AmountPln, d.WithholdingTaxPln, d.CreditableWithholdingPln,
+        d.MaxCreditableRate, d.ExchangeRate, d.RateUnavailable, d.Isin, d.CountryCode,
+        d.AccountId, d.TransactionId, d.ActionId, d.SourceFile, d.WithholdingSource);
+
+    /// <summary>
+    /// PIT-38 of a stored session: the same calculation as right after the import. The session must be loaded with
+    /// its dividend rows (see <see cref="ToDividend"/>), or interest with several payments rounds differently.
+    /// </summary>
     public static Pit38Fields ToPit38(SessionEntity session)
     {
         var pit38 = Pit38Fields.FromSummary(ToSummary(session));
@@ -168,7 +182,7 @@ public static class EntityMapper
         e.Amount, e.Date, e.BookingDate, e.SourceStatementYear, e.TransactionId, e.ActionId, e.Reference,
         e.SourceFile, e.RawType, e.RawDescription,
         Enum.TryParse<WithholdingEventStatus>(e.Status, out var status) ? status : WithholdingEventStatus.Unresolved,
-        e.MatchedPayment, e.AmountPln, e.UnresolvedAmountPln, e.DiagnosticCode);
+        e.MatchedPayment, e.AmountPln, e.UnresolvedAmountPln, e.DiagnosticCode, e.ReportDate, e.SettleDate);
 
     public static object ToSummaryResponse(SessionEntity session) => ToSummaryResponse(ToSummary(session), ToPit38(session));
 

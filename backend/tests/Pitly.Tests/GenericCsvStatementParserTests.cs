@@ -28,7 +28,9 @@ public class GenericCsvStatementParserTests
         var parsed = Parser.Parse(csv);
 
         Assert.Equal("DEGIRO", parsed.Broker);
-        Assert.Equal("DEGIRO", parsed.AccountId);   // the broker column is the account
+        // Recheck P1-01: a broker name is not an account number. Without an account_id column the statement carries
+        // no account, so the import treats it like any file without one instead of calling the broker a confirmed account.
+        Assert.Null(parsed.AccountId);
         Assert.Equal(2024, parsed.StatementYear);
         Assert.Empty(parsed.Dividends);
         Assert.Empty(parsed.WithholdingTaxes);
@@ -69,7 +71,7 @@ public class GenericCsvStatementParserTests
 
         var degiro = statements[0];
         Assert.Equal("DEGIRO", degiro.Broker);
-        Assert.Equal("DEGIRO", degiro.AccountId);
+        Assert.Null(degiro.AccountId);   // recheck P1-01: no account_id column, no account number
         var dividend = Assert.Single(degiro.Dividends);
         Assert.Equal(IncomeKind.Dividend, dividend.Kind);
         Assert.Equal("AAPL", dividend.Symbol);
@@ -84,7 +86,8 @@ public class GenericCsvStatementParserTests
         Assert.Empty(degiro.WithholdingTaxes);
 
         var swissquote = statements[1];
-        Assert.Equal("SWISSQUOTE", swissquote.AccountId);
+        Assert.Equal("SWISSQUOTE", swissquote.Broker);
+        Assert.Null(swissquote.AccountId);
         var interest = Assert.Single(swissquote.Dividends);
         Assert.Equal(IncomeKind.Interest, interest.Kind);
         Assert.Equal("SAVINGS-EUR", interest.Symbol);
@@ -96,7 +99,7 @@ public class GenericCsvStatementParserTests
 
         // Two brokers are two accounts: the file is not one statement.
         var ex = Assert.Throws<FormatException>(() => Parser.Parse(csv));
-        Assert.Contains("2 brokers", ex.Message);
+        Assert.Contains("2 accounts", ex.Message);
         Assert.Contains("DEGIRO, SWISSQUOTE", ex.Message);
     }
 

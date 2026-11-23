@@ -11,6 +11,22 @@ namespace Pitly.Core.Tax;
 /// underlying company's country). Rates are portfolio (non-substantial holding) rates from the respective
 /// Poland treaties; verify against the current treaty text before relying on them for edge cases.
 /// </summary>
+public enum TreatyRateStatus
+{
+    /// <summary>The portfolio dividend rate of the treaty with the issuer's country is on file.</summary>
+    Known,
+    /// <summary>The row carries no ISIN, so the issuer's country cannot be told.</summary>
+    NoIsin,
+    /// <summary>The first two characters of the ISIN are not a country code.</summary>
+    InvalidCountry,
+    /// <summary>The country is readable but Pitly has no treaty data for it: a treaty may exist, or not.</summary>
+    Unknown
+}
+
+/// <param name="Rate">The treaty cap; set only when <paramref name="Status"/> is <see cref="TreatyRateStatus.Known"/>.</param>
+/// <param name="Country">The country read from the ISIN, when readable.</param>
+public sealed record TreatyRateLookup(TreatyRateStatus Status, decimal? Rate, string? Country);
+
 public static class TreatyWithholdingRates
 {
     private static readonly Dictionary<string, decimal> PortfolioDividendRates = new(StringComparer.OrdinalIgnoreCase)
@@ -44,16 +60,29 @@ public static class TreatyWithholdingRates
     };
 
     /// <summary>
-    /// Returns the treaty cap for the issuer country encoded in the ISIN, or null when the ISIN is
-    /// missing or the country has no treaty rate on file. Callers fall back to the statutory 19% cap.
+    /// Returns the treaty cap for the issuer country encoded in the ISIN, or null when the ISIN is missing or the
+    /// country has no treaty rate on file. A null is not a licence to credit at 19%: callers use
+    /// <see cref="Lookup"/> to tell the cases apart and report them.
     /// </summary>
-    public static decimal? GetMaxCreditableRate(string? isin)
+    public static decimal? GetMaxCreditableRate(string? isin) => Lookup(isin).Rate;
+
+    /// <summary>
+    /// What is known about the treaty cap for the issuer of <paramref name="isin"/>. Only <see cref="TreatyRateStatus.Known"/>
+    /// carries a rate; every other status means the treaty cap cannot be applied and the caller must say so rather
+    /// than fall back to another method.
+    /// </summary>
+    public static TreatyRateLookup Lookup(string? isin)
     {
+        if (string.IsNullOrWhiteSpace(isin))
+            return new TreatyRateLookup(TreatyRateStatus.NoIsin, null, null);
+
         var country = GetCountryCode(isin);
         if (country is null)
-            return null;
+            return new TreatyRateLookup(TreatyRateStatus.InvalidCountry, null, isin.Trim().Length >= 2 ? isin.Trim()[..2] : isin.Trim());
 
-        return PortfolioDividendRates.TryGetValue(country, out var rate) ? rate : null;
+        return PortfolioDividendRates.TryGetValue(country, out var rate)
+            ? new TreatyRateLookup(TreatyRateStatus.Known, rate, country)
+            : new TreatyRateLookup(TreatyRateStatus.Unknown, null, country);
     }
 
     public static string? GetCountryCode(string? isin)

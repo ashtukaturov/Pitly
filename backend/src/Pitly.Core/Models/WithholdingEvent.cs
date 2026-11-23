@@ -40,4 +40,7 @@ public record WithholdingEvent(
     decimal AmountPln,
     // Part of the event that is not in the declared amounts (the whole event when unresolved, the excess of a refund)
     decimal UnresolvedAmountPln,
-    string? DiagnosticCode);
+    string? DiagnosticCode,
+    // The day the row entered the broker's reports (IB Flex), when it differs from the booking day
+    DateTime? ReportDate = null,
+    DateTime? SettleDate = null);

@@ -52,7 +52,9 @@ public static class DbSchemaUpgrader
         ("Dividends", "TransactionId", "TEXT NULL"),
         ("Dividends", "ActionId", "TEXT NULL"),
         ("Dividends", "SourceFile", "TEXT NULL"),
-        ("Dividends", "WithholdingSource", "TEXT NULL")
+        ("Dividends", "WithholdingSource", "TEXT NULL"),
+        ("WithholdingEvents", "ReportDate", "TEXT NULL"),
+        ("WithholdingEvents", "SettleDate", "TEXT NULL")
     ];
 
     private const string WithholdingEventsTable =
@@ -65,11 +67,16 @@ public static class DbSchemaUpgrader
             TransactionId TEXT NULL, ActionId TEXT NULL, Reference TEXT NULL, SourceFile TEXT NULL,
             RawType TEXT NULL, RawDescription TEXT NULL, Status TEXT NOT NULL, MatchedPayment TEXT NULL,
             AmountPln TEXT NOT NULL, UnresolvedAmountPln TEXT NOT NULL, DiagnosticCode TEXT NULL,
+            ReportDate TEXT NULL, SettleDate TEXT NULL,
             CONSTRAINT FK_WithholdingEvents_Sessions_SessionId FOREIGN KEY (SessionId) REFERENCES Sessions (Id) ON DELETE CASCADE);
         """;
 
     public static void EnsureLatestSchema(AppDbContext db)
     {
+        // The events table is created first (a no-op where it exists), so that columns added to it later can be
+        // checked like any other.
+        Execute(db, WithholdingEventsTable);
+
         var existing = Columns
             .Select(c => c.Table)
             .Distinct()
@@ -86,8 +93,6 @@ public static class DbSchemaUpgrader
             if (!existing[table].Contains(column))
                 Execute(db, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition + ";");
         }
-
-        Execute(db, WithholdingEventsTable);
 
         RepairStoredSessions(db, rowsCarryKindAndCredit);
     }

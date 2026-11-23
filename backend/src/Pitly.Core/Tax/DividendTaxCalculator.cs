@@ -116,37 +116,63 @@ public class DividendTaxCalculator : IDividendTaxCalculator
             if (payment.Source == "none")
                 payment.Source = linked.Links.Any(l => l.Share < 1m) ? "shared" : "matched";
 
-            // A refund is netted against the tax it refunds in the currency of the tax; what remains is tax paid and
-            // is valued at the rate of the day it was paid (art. 11a ust. 3). Netting after conversion would turn a
-            // full refund at another rate into a spurious excess or a spurious credit.
+            // Every tax actually withheld is valued at the NBP rate of the day before it was paid (art. 11a ust. 3):
+            // two withholdings on one payment on two days are two conversions, never one at the first row's rate.
+            // A refund is netted in the currency of the tax against the withholding it reverses: the one of exactly
+            // its amount when there is one, otherwise the latest withholdings first (a correction reverses the most
+            // recent booking). What remains of each withholding keeps its own rate. Netting after conversion would
+            // turn a full refund at another rate into a spurious excess or a spurious credit.
             foreach (var currencyGroup in linked.Links.GroupBy(l => l.Event.Currency.ToUpperInvariant()))
             {
                 var currency = currencyGroup.Key;
-                var net = currencyGroup.Sum(l => l.Event.Amount * l.Share);
                 var sameCurrency = currency.Equals(payment.Raw.Currency, StringComparison.OrdinalIgnoreCase);
-                var positives = currencyGroup.Where(l => l.Event.Amount > 0m).ToList();
-                var valuationDate = positives.Count > 0 ? positives[0].Event.EffectiveDate : currencyGroup.First().Event.EffectiveDate;
-                var rate = sameCurrency && valuationDate.Date == payment.Raw.Date.Date ? payment.Rate : await RateAsync(rates, currency, valuationDate);
+                var positives = currencyGroup.Where(l => l.Event.Amount > 0m)
+                    .Select(l => new Withheld(l.Event, l.Event.Amount * l.Share))
+                    .OrderBy(w => w.Event.EffectiveDate).ThenBy(w => w.Event.Date).ToList();
+                var refunds = currencyGroup.Where(l => l.Event.Amount < 0m).Select(l => -l.Event.Amount * l.Share).ToList();
 
-                foreach (var positive in positives.Where(l => l.Event.EffectiveDate.Date != payment.Raw.Date.Date))
+                foreach (var positive in positives.Where(w => w.Event.EffectiveDate.Date != payment.Raw.Date.Date))
                 {
                     if (InPeriod(payment.Raw.Date))
                     {
                         Add(new TaxDiagnostic(DiagnosticCodes.RateDate, DiagnosticSeverity.Info,
-                            $"Tax of {Money(positive.Event.Amount * positive.Share, currency)} on {payment.Raw.Symbol} ({payment.Raw.Date:yyyy-MM-dd}) was paid on " +
+                            $"Tax of {Money(positive.Amount, currency)} on {payment.Raw.Symbol} ({payment.Raw.Date:yyyy-MM-dd}) was paid on " +
                             $"{positive.Event.EffectiveDate:yyyy-MM-dd} and is converted at the NBP rate of the day before that date, not the income's rate (art. 11a ust. 3).",
                             positive.Event.SourceFile, payment.Raw.AccountId, [paymentYear]));
                     }
                 }
 
-                if (net >= 0m)
+                var excess = 0m;
+                foreach (var refund in refunds)
                 {
-                    payment.WithheldPln += net * rate;
-                    payment.WithheldOriginal += sameCurrency || payment.Rate == 0m ? net : net * rate / payment.Rate;
+                    var left = refund;
+                    var exact = positives.FirstOrDefault(w => w.Remaining == left);
+                    if (exact is not null)
+                    {
+                        exact.Remaining = 0m;
+                        continue;
+                    }
+
+                    foreach (var w in positives.OrderByDescending(w => w.Event.EffectiveDate).ThenByDescending(w => w.Event.Date))
+                    {
+                        if (left <= 0m) break;
+                        var taken = Math.Min(w.Remaining, left);
+                        w.Remaining -= taken;
+                        left -= taken;
+                    }
+
+                    excess += left;
                 }
-                else
+
+                foreach (var w in positives.Where(w => w.Remaining > 0m))
                 {
-                    var excess = -net;
+                    var rate = sameCurrency && w.Event.EffectiveDate.Date == payment.Raw.Date.Date ? payment.Rate : await RateAsync(rates, currency, w.Event.EffectiveDate);
+                    payment.WithheldPln += w.Remaining * rate;
+                    payment.WithheldOriginal += sameCurrency || payment.Rate == 0m ? w.Remaining : w.Remaining * rate / payment.Rate;
+                }
+
+                if (excess > 0m)
+                {
                     var refund = currencyGroup.Where(l => l.Event.Amount < 0m).OrderByDescending(l => l.Event.EffectiveDate).First().Event;
                     var excessRate = await RateAsync(rates, currency, refund.EffectiveDate);
                     var excessPln = excess * excessRate;
@@ -172,9 +198,9 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                     var amountPln = Math.Abs(amount) * await RateAsync(rates, currency, link.Event.EffectiveDate);
                     var what = amount < 0m ? "refund of tax withheld" : "additional tax";
                     Add(new TaxDiagnostic(DiagnosticCodes.CrossYearAdjustment, DiagnosticSeverity.Warning,
-                        $"A {what} on {payment.Raw.Symbol} paid on {payment.Raw.Date:yyyy-MM-dd} ({paymentYear}) was booked in {bookingYear}: {Money(Math.Abs(amount), currency)} ({Pln(amountPln)}). " +
-                        $"It is attributed to the {paymentYear} payment, so the {paymentYear} credit already reflects it. Whether its tax effect belongs to {paymentYear} (a corrected return) " +
-                        $"or to {bookingYear} is not decided by Pitly; confirm the treatment before filing either year.",
+                        $"A {what} on {payment.Raw.Symbol} paid on {payment.Raw.Date:yyyy-MM-dd} ({paymentYear}) belongs to {bookingYear} by its {link.Event.BookingYearEvidence}: {Money(Math.Abs(amount), currency)} ({Pln(amountPln)}). " +
+                        $"It is attributed to the {paymentYear} payment, so the {paymentYear} credit already reflects it. Whether its tax effect belongs to {paymentYear} (a corrected return, art. 81 O.p.) " +
+                        $"or to {bookingYear} (art. 45 ust. 3a ustawy o PIT) is not decided by Pitly; confirm the treatment before filing either year.",
                         link.Event.SourceFile, payment.Raw.AccountId, new[] { paymentYear, bookingYear }.OrderBy(y => y).ToList(), amountPln, AffectsAmounts: true));
                 }
             }
@@ -265,21 +291,56 @@ public class DividendTaxCalculator : IDividendTaxCalculator
 
             // Art. 30a ust. 9: the foreign tax credit cannot exceed 19% of the income. On top of that, for dividends
             // only tax withheld in line with the applicable treaty is creditable (TreatyCap): the excess (e.g. 30% US
-            // withholding without a W-8BEN) must be reclaimed abroad, not offset against Polish tax. The treaty
+            // withholding without a W-8BEN) must be reclaimed abroad, not offset against Polish tax. When the treaty
+            // rate cannot be told (no ISIN, unreadable or unknown country) the treaty cap cannot be applied; the tax
+            // is then not credited and the result is blocked with the reason, because an unknown rate is not a
+            // licence to apply the statutory cap instead (that is the user's explicit choice of method). The treaty
             // dividend rates do not apply to interest: interest has its own treaty articles, which Pitly does not
-            // model, so interest keeps the statutory cap whatever ISIN the row carries.
-            decimal? treatyRate = div.Kind == IncomeKind.Interest || method == CreditMethod.StatutoryCap
-                ? null
-                : TreatyWithholdingRates.GetMaxCreditableRate(div.Isin);
-            var maxCreditableRate = treatyRate ?? TaxConstants.TaxRate;
-            var creditableWithholdingPln = Math.Max(Math.Min(payment.WithheldPln, payment.AmountPln * maxCreditableRate), 0m);
+            // model, so interest keeps the statutory cap whatever ISIN the row carries, and says so.
+            decimal? treatyRate = null;
+            var maxCreditableRate = TaxConstants.TaxRate;
+            var treatyUnknown = false;
+            if (div.Kind != IncomeKind.Interest && method == CreditMethod.TreatyCap)
+            {
+                var lookup = TreatyWithholdingRates.Lookup(div.Isin);
+                if (lookup.Status == TreatyRateStatus.Known)
+                {
+                    treatyRate = lookup.Rate;
+                    maxCreditableRate = lookup.Rate!.Value;
+                }
+                else if (payment.WithheldPln > 0m)
+                {
+                    treatyUnknown = true;
+                    maxCreditableRate = 0m;
+                    var reason = lookup.Status switch
+                    {
+                        TreatyRateStatus.NoIsin => "the row carries no ISIN, so the issuer's country cannot be told",
+                        TreatyRateStatus.InvalidCountry => $"the ISIN {div.Isin} does not start with a country code",
+                        _ => $"Pitly has no treaty rate on file for {lookup.Country} (the issuer's country by the ISIN); a treaty may exist or not"
+                    };
+                    Add(new TaxDiagnostic(DiagnosticCodes.TreatyRateUnknown, DiagnosticSeverity.Warning,
+                        $"{WithholdingMatcher.KindLabel(div.Kind)} {div.Symbol} ({div.Date:yyyy-MM-dd}): {Pln(payment.WithheldPln)} of foreign tax was not credited because {reason}. " +
+                        "The treaty cap (the default method) cannot be applied without the treaty rate; verify the rate for that country, or choose the statutory 19% cap explicitly for comparison.",
+                        div.SourceFile, div.AccountId, [div.Date.Year], payment.WithheldPln, AffectsAmounts: true));
+                }
+            }
+            var creditableWithholdingPln = treatyUnknown ? 0m : Math.Max(Math.Min(payment.WithheldPln, payment.AmountPln * maxCreditableRate), 0m);
 
-            if (div.Kind == IncomeKind.Interest && !string.IsNullOrWhiteSpace(div.Isin) && payment.WithheldPln > 0m)
+            if (div.Kind == IncomeKind.Interest && payment.WithheldPln > 0m && method == CreditMethod.TreatyCap)
             {
                 Add(new TaxDiagnostic(DiagnosticCodes.ClassificationUnverified, DiagnosticSeverity.Info,
-                    $"Interest on {div.Symbol} ({div.Isin}) carries foreign tax; the credit was capped at 19% (art. 30a ust. 9), not at a treaty rate, " +
-                    "because the treaty rates on file are dividend rates.",
+                    $"Interest {div.Symbol} ({div.Date:yyyy-MM-dd}) carries foreign tax; the credit was capped at 19% (art. 30a ust. 9), not at a treaty rate, " +
+                    "because the treaty rates on file are dividend rates and the interest articles of the treaties are not modelled.",
                     div.SourceFile, div.AccountId, [div.Date.Year]));
+            }
+
+            if (!string.IsNullOrWhiteSpace(div.ClassificationNote))
+            {
+                // The income is in the amounts under the kind the statement suggests; the user has to confirm the
+                // classification before filing, so the finding blocks and names the money that depends on it.
+                Add(new TaxDiagnostic(DiagnosticCodes.ClassificationUnverified, DiagnosticSeverity.Warning,
+                    $"{div.Symbol} ({div.Date:yyyy-MM-dd}, {Money(div.Amount, div.Currency)} = {Pln(payment.AmountPln)}): {div.ClassificationNote}",
+                    div.SourceFile, div.AccountId, [div.Date.Year], payment.AmountPln, AffectsAmounts: true));
             }
 
             results.Add(new Dividend(
@@ -306,6 +367,21 @@ public class DividendTaxCalculator : IDividendTaxCalculator
         return new DividendCalculation(results, eventRecords.OrderBy(e => e.Date).ThenBy(e => e.Symbol).ToList());
     }
 
+    /// <summary>One tax withheld on a payment and what is left of it after the refunds were netted.</summary>
+    private sealed class Withheld
+    {
+        public Withheld(RawWithholdingTax e, decimal amount)
+        {
+            Event = e;
+            Amount = amount;
+            Remaining = amount;
+        }
+
+        public RawWithholdingTax Event { get; }
+        public decimal Amount { get; }
+        public decimal Remaining { get; set; }
+    }
+
     private async Task<WithholdingEvent> ToEventAsync(
         Dictionary<string, decimal> rates, RawWithholdingTax e, WithholdingEventStatus status, string? matched, decimal unresolvedPln, string? code)
     {
@@ -313,7 +389,7 @@ public class DividendTaxCalculator : IDividendTaxCalculator
         return new WithholdingEvent(
             e.AccountId, e.Symbol, e.Isin, e.Currency, e.Kind, e.Amount, e.Date, e.BookingDate, e.SourceStatementYear,
             e.TransactionId, e.ActionId, e.Reference, e.SourceFile, e.RawType, e.RawDescription,
-            status, matched, e.Amount * rate, unresolvedPln, code);
+            status, matched, e.Amount * rate, unresolvedPln, code, e.ReportDate, e.SettleDate);
     }
 
     private async Task<decimal> RateAsync(Dictionary<string, decimal> cache, string currency, DateTime date)

@@ -43,8 +43,12 @@ public static class DiagnosticCodes
     public const string CreditMethod = "CREDIT_METHOD";
     /// <summary>A control total of the statement does not agree with the rows that were read from it.</summary>
     public const string SummaryMismatch = "SUMMARY_MISMATCH";
-    /// <summary>Interest whose legal classification Pitly does not establish (securities lending, payments in lieu).</summary>
+    /// <summary>Income whose legal classification Pitly does not establish (securities lending, payments in lieu).</summary>
     public const string ClassificationUnverified = "CLASSIFICATION_UNVERIFIED";
+    /// <summary>Two files of one account describe the same day's operations with different amounts; the second file's rows were not added.</summary>
+    public const string SourceConflict = "SOURCE_CONFLICT";
+    /// <summary>The issuer's country has no treaty rate on file (or cannot be told), so the foreign tax was not credited under the treaty cap.</summary>
+    public const string TreatyRateUnknown = "TREATY_RATE_UNKNOWN";
 }
 
 /// <summary>

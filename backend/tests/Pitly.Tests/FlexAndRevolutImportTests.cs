@@ -297,7 +297,9 @@ public class FlexAndRevolutImportTests
             .Interest("REVOLUT", "R1", "2025-01-31", "EUR interest", "LT", 0.01m, 0m, "EUR")
             .Interest("REVOLUT", "R2", "2025-03-31", "PLN interest", "LT", 1.5m, 0m, "PLN");
 
-        // 0.01 EUR at a synthetic 10.51 PLN/EUR = 0.1051 PLN; plus 1.50 PLN = 1.6051 PLN; 19% = 0.304969 -> 0.31 PLN (interest, grosz up).
+        // 0.01 EUR at a synthetic 10.51 PLN/EUR = 0.1051 PLN and 1.50 PLN: per payment (art. 63 § 1a O.p., recheck P1-07)
+        // base 0.11 -> tax 0.0209 -> 0.03, and base 1.50 -> tax 0.285 -> 0.29; together 0.32 PLN. (The earlier 0.31 came
+        // from 19% of the unrounded yearly total; the base is rounded per payment now.)
         using var app = new PitlyApp(new Dictionary<string, decimal> { ["EUR"] = 10.51m });
         var fromRevolut = await app.ImportAsync([("revolut.csv", revolut)]);
         var fromGeneric = await app.ImportAsync([("income.csv", generic.Build())]);
@@ -306,8 +308,8 @@ public class FlexAndRevolutImportTests
         Assert.Equal(HttpStatusCode.OK, fromGeneric.Status);
         Assert.Equal(1.6051m, fromRevolut.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(fromGeneric.Summary.GetProperty("totalDividendsPln").GetDecimal(), fromRevolut.Summary.GetProperty("totalDividendsPln").GetDecimal());
-        Assert.Equal(0.31m, fromRevolut.Field("zryczaltowanyPodatek"));
-        Assert.Equal(0.31m, fromRevolut.Field("podatekDoZaplaty"));
+        Assert.Equal(0.32m, fromRevolut.Field("zryczaltowanyPodatek"));
+        Assert.Equal(0.32m, fromRevolut.Field("podatekDoZaplaty"));
         Assert.Equal(fromGeneric.Field("podatekDoZaplaty"), fromRevolut.Field("podatekDoZaplaty"));
 
         var revolutRows = fromRevolut.Body.GetProperty("dividends").EnumerateArray().Select(d => (d.GetProperty("currency").GetString(), d.GetProperty("amountOriginal").GetDecimal(), d.GetProperty("date").GetString())).OrderBy(x => x.Item3).ToList();
