@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Info, Search } from 'lucide-react';
-import { formatPln, formatUsd, formatRate, formatDate, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
-import type { AppState } from '../types';
+import { formatPln, formatRate, formatDate, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
+import type { AppState, WithholdingEvent } from '../types';
 import EmptyState from '../components/EmptyState';
 import { useT } from '../i18n';
 import { formRefs } from '../pit38Form';
@@ -130,10 +130,15 @@ export default function DividendsPage({ state }: { state: AppState }) {
                         {kindKey ? t(kindKey) : d.kind}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{formatUsd(d.amountOriginal)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300 whitespace-nowrap">{d.amountOriginal.toFixed(2)} {d.currency}</td>
                     <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-400">{formatRate(d.exchangeRate)}</td>
                     <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{formatPln(d.amountPln)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono tabular-nums text-red-400">{formatPln(d.withholdingTaxPln)}</td>
+                    <td
+                      className="px-3 py-2.5 text-right font-mono tabular-nums text-red-400"
+                      title={d.withholdingSource ? t(`events.withholdingSource.${d.withholdingSource}`) : undefined}
+                    >
+                      {formatPln(d.withholdingTaxPln)}
+                    </td>
                     <td
                       className={`px-3 py-2.5 text-right font-mono tabular-nums ${capped ? 'text-amber-400' : 'text-red-400'}`}
                       title={d.maxCreditableRate != null
@@ -161,6 +166,81 @@ export default function DividendsPage({ state }: { state: AppState }) {
           </table>
         </div>
       </div>
+
+      <WithholdingEvents events={state.withholdingEvents} />
+    </div>
+  );
+}
+
+const STATUS_STYLES: Record<WithholdingEvent['status'], string> = {
+  Matched: 'bg-emerald-500/15 text-emerald-300',
+  Shared: 'bg-blue-500/15 text-blue-300',
+  Unresolved: 'bg-amber-500/15 text-amber-300',
+};
+
+// Every withholding event of the year as the statements report it and what the calculation did with it
+// (backend WithholdingEvent). This is the audit trail behind the "Withheld" column above.
+function WithholdingEvents({ events }: { events: WithholdingEvent[] }) {
+  const t = useT();
+  const th = 'text-slate-400 text-xs uppercase tracking-wider font-medium px-3 py-3';
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-slate-700">
+        <h2 className="text-white text-lg font-semibold">{t('events.title')}</h2>
+        <p className="text-slate-400 text-sm mt-1">{t('events.intro')}</p>
+      </div>
+      {events.length === 0 ? (
+        <p className="px-6 py-4 text-slate-500 text-sm">{t('events.none')}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700">
+                <th className={`${th} text-left`}>{t('events.col.date')}</th>
+                <th className={`${th} text-left`}>{t('events.col.instrument')}</th>
+                <th className={`${th} text-right`}>{t('events.col.amount')}</th>
+                <th className={`${th} text-left`}>{t('events.col.status')}</th>
+                <th className={`${th} text-left`}>{t('events.col.payment')}</th>
+                <th className={`${th} text-left`}>{t('events.col.source')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e, i) => {
+                const bookedElsewhere = e.sourceStatementYear != null && e.sourceStatementYear !== new Date(e.date).getFullYear();
+                const codeKey = e.diagnosticCode ? `diag.code.${e.diagnosticCode}` : null;
+                return (
+                  <tr key={i} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                    <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">
+                      {formatDate(e.date)}
+                      {bookedElsewhere && <span className="block text-xs text-amber-400">{t('events.booked', { year: e.sourceStatementYear ?? '' })}</span>}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="text-white font-medium">{e.symbol}</span>
+                      {e.reference && <span className="ml-2 text-xs text-slate-500">{e.reference}</span>}
+                      {e.rawDescription && <span className="block text-xs text-slate-500 max-w-xs truncate" title={e.rawDescription}>{e.rawDescription}</span>}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right font-mono tabular-nums ${e.amount < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {e.amount.toFixed(2)} {e.currency}
+                      <span className="block text-xs text-slate-500">{formatPln(e.amountPln)}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-medium ${STATUS_STYLES[e.status]}`}>
+                        {t(`events.status.${e.status}`)}
+                      </span>
+                      {codeKey && <span className="block text-xs text-amber-400/80 mt-0.5">{t(codeKey)}</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{e.matchedPayment ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-500">
+                      {e.sourceFile}
+                      {e.accountId && <span className="block">{e.accountId}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

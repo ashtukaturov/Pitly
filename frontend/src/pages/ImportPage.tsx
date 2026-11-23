@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Upload, Download, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { describeImportError, importFiles, ImportError } from '../api';
-import type { AppState } from '../types';
+import type { AppState, CreditMethod } from '../types';
 import PriorYearLossesInput from '../components/PriorYearLossesInput';
 import { validatePriorYearLossRows, type PriorYearLossRow } from '../priorYearLosses';
 import { useT, useLang, type Lang } from '../i18n/index';
@@ -77,6 +77,7 @@ export default function ImportPage({
   const [otherYears, setOtherYears] = useState<number[]>([]);
   const [residencyStartDate, setResidencyStartDate] = useState('');
   const [priorYearLosses, setPriorYearLosses] = useState<PriorYearLossRow[]>([]);
+  const [creditMethod, setCreditMethod] = useState<CreditMethod>('TreatyCap');
 
   const [dragOver, setDragOver] = useState(false);
 
@@ -119,6 +120,7 @@ export default function ImportPage({
         priorYearLosses: lossCheck.losses.length > 0 ? lossCheck.losses : undefined,
         taxYear,
         accountLabels,
+        creditMethod,
       });
       clearTimeout(timer1);
       clearTimeout(timer2);
@@ -137,6 +139,8 @@ export default function ImportPage({
           priorYearLosses: lossCheck.losses,
           importedFiles: result.files,
           accountLabels,
+          withholdingEvents: result.withholdingEvents ?? [],
+          creditMethod,
         });
       }, 600);
     } catch (err: unknown) {
@@ -151,7 +155,7 @@ export default function ImportPage({
       if (err instanceof ImportError)
         setOtherYears(err.availableYears.filter(year => year !== err.taxYear));
     }
-  }, [onComplete, pendingFiles, existingFiles, accountLabels, residencyStartDate, priorYearLosses, t]);
+  }, [onComplete, pendingFiles, existingFiles, accountLabels, residencyStartDate, priorYearLosses, creditMethod, t]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -219,6 +223,24 @@ export default function ImportPage({
 
           <PriorYearLossesInput rows={priorYearLosses} onChange={setPriorYearLosses} />
 
+          <div className="mb-6 bg-slate-800 border border-slate-700 rounded-xl p-5">
+            <label className="block">
+              <span className="text-slate-200 font-medium">{t('import.creditMethodLabel')}</span>
+              <span className="block text-slate-500 text-sm mt-1">{t('import.creditMethodHint')}</span>
+              <select
+                value={creditMethod}
+                onChange={(e) => setCreditMethod(e.target.value as CreditMethod)}
+                className="mt-3 w-full md:w-auto bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="TreatyCap">{t('import.creditMethod.TreatyCap')}</option>
+                <option value="StatutoryCap">{t('import.creditMethod.StatutoryCap')}</option>
+              </select>
+              {creditMethod === 'StatutoryCap' && (
+                <span className="block text-amber-300 text-sm mt-2">{t('import.creditMethodWarning')}</span>
+              )}
+            </label>
+          </div>
+
           <label
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -274,6 +296,19 @@ export default function ImportPage({
               <p>{t('import.ibStep4')}</p>
               <p>{t('import.ibStep5')}</p>
               <p>{t('import.ibStep6')}</p>
+            </HelpSection>
+            <HelpSection title={t('import.flexTitle')}>
+              <p>{t('import.flexStep1Prefix')}<strong className="text-slate-300">Performance &amp; Reports &rarr; Flex Queries</strong>{t('import.flexStep1Suffix')}</p>
+              <p>{t('import.flexStep2Prefix')}<strong className="text-slate-300">Trades</strong>, <strong className="text-slate-300">Cash Transactions</strong>, <strong className="text-slate-300">Corporate Actions</strong>{t('import.flexStep2Suffix')}</p>
+              <p>{t('import.flexStep3')}</p>
+              <p>{t('import.flexStep4')}</p>
+              <p>{t('import.flexStep5')}</p>
+            </HelpSection>
+            <HelpSection title={t('import.revolutTitle')}>
+              <p>{t('import.revolutStep1')}</p>
+              <p>{t('import.revolutStep2')}</p>
+              <p>{t('import.revolutStep3')}</p>
+              <p>{t('import.revolutStep4')}</p>
             </HelpSection>
             <HelpSection title={t('import.t212Title')}>
               <p>{t('import.t212Step1')}</p>

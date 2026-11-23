@@ -19,4 +19,10 @@ public class DividendEntity
     public string? Isin { get; set; }
     // Source country named by the statement (generic CSV); null when the country comes from the ISIN
     public string? CountryCode { get; set; }
+    // Provenance of the row: account, the broker's ids, the file it came from and how its withholding was tied to it
+    public string? AccountId { get; set; }
+    public string? TransactionId { get; set; }
+    public string? ActionId { get; set; }
+    public string? SourceFile { get; set; }
+    public string? WithholdingSource { get; set; }
 }

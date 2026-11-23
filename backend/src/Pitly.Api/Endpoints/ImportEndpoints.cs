@@ -3,6 +3,7 @@ using System.Text.Json;
 using Pitly.Api.Mapping;
 using Pitly.Api.Services;
 using Pitly.Core.Models;
+using Pitly.Core.Tax;
 
 namespace Pitly.Api.Endpoints;
 
@@ -67,6 +68,14 @@ public static class ImportEndpoints
                 taxYear = parsedTaxYear;
             }
 
+            var creditMethod = CreditMethod.TreatyCap;
+            var creditMethodRaw = form["creditMethod"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(creditMethodRaw))
+            {
+                if (!Enum.TryParse(creditMethodRaw, ignoreCase: true, out creditMethod))
+                    return Results.BadRequest(new { error = "creditMethod must be TreatyCap or StatutoryCap." });
+            }
+
             var files = form.Files
                 .Where(f => f.Length > 0)
                 .ToList();
@@ -96,7 +105,7 @@ public static class ImportEndpoints
                 try
                 {
                     var result = await importService.ImportStatementsAsync(
-                        streams, residencyStartDate, priorYearLosses, taxYear, files.Select(f => f.FileName).ToList(), accountLabels);
+                        streams, residencyStartDate, priorYearLosses, taxYear, files.Select(f => f.FileName).ToList(), accountLabels, creditMethod);
                     // Single source of truth for the form values: computed here with decimal arithmetic
                     // instead of being re-derived on the frontend with floating point.
                     var pit38 = Pit38Fields.FromSummary(result.Summary);
@@ -109,7 +118,8 @@ public static class ImportEndpoints
                         summary = EntityMapper.ToSummaryResponse(result.Summary, pit38),
                         pit38,
                         trades = result.Summary.TradeResults,
-                        dividends = result.Summary.Dividends
+                        dividends = result.Summary.Dividends,
+                        withholdingEvents = result.Summary.WithholdingEvents ?? []
                     });
                 }
                 finally

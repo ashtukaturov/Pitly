@@ -80,25 +80,56 @@ public class WithholdingAttributionTests
     }
 
     [Fact]
-    public async Task AmbiguousWithholdingIsSplitByPlnValueAndReported()
+    public async Task AmbiguousWithholdingIsLeftUnresolvedAndReported()
     {
-        // The withholding is in GBP-like third currency (PLN here): neither payment is in that currency.
+        // The withholding is in a third currency (PLN here): neither payment is in that currency, so the row fits both.
+        // Earlier versions split it 4:1 by PLN value; that is an assumption about the broker's event, so the row is
+        // now left unresolved with its amount and the user is told why.
         var dividends = new List<RawDividend>
         {
             new("XYZ", "USD", Day, 100m),  // 400 PLN
             new("XYZ", "EUR", Day, 20m)    // 100 PLN
         };
         var taxes = new List<RawWithholdingTax> { new("XYZ", "PLN", Day, 50m) };
-        var warnings = new List<string>();
+        var diagnostics = new List<TaxDiagnostic>();
 
-        var results = await NewCalculator().CalculateAsync(dividends, taxes, warnings);
+        var result = await NewCalculator().CalculateAsync(dividends, taxes, null, CreditMethod.TreatyCap, diagnostics);
 
-        // Split 4:1 by PLN value, not 100:20 by the raw amounts in different currencies.
-        Assert.Equal(40m, results[0].WithholdingTaxPln);
-        Assert.Equal(10m, results[1].WithholdingTaxPln);
-        Assert.Equal(50m, results.Sum(r => r.WithholdingTaxPln));
-        var warning = Assert.Single(warnings);
-        Assert.Contains("could not be tied to one payment", warning);
+        Assert.All(result.Dividends, r => Assert.Equal(0m, r.WithholdingTaxPln));
+        var diagnostic = Assert.Single(diagnostics, d => d.Code == DiagnosticCodes.AmbiguousMatch);
+        Assert.Equal(50m, diagnostic.UnresolvedAmountPln);
+        Assert.True(diagnostic.BlocksFiling);
+        Assert.Contains("2 candidate", diagnostic.Message);
+        var unresolved = Assert.Single(result.Events);
+        Assert.Equal(WithholdingEventStatus.Unresolved, unresolved.Status);
+    }
+
+    [Fact]
+    public async Task InterestWithholdingWithoutAPeriodThatFitsTwoInterestRowsIsLeftUnresolved()
+    {
+        // Two interest rows of one day and currency (as a Flex Query or a generic file can list them) and a tax row
+        // that names no period: it fits both, so it is credited to neither.
+        var dividends = new List<RawDividend>
+        {
+            new("PLN interest", "PLN", Day, 100m, Kind: IncomeKind.Interest, TransactionId: "1"),
+            new("PLN interest", "PLN", Day, 50m, Kind: IncomeKind.Interest, TransactionId: "2")
+        };
+        var taxes = new List<RawWithholdingTax> { new("PLN interest", "PLN", Day, 15m, Kind: IncomeKind.Interest) };
+        var diagnostics = new List<TaxDiagnostic>();
+
+        var result = await NewCalculator().CalculateAsync(dividends, taxes, null, CreditMethod.TreatyCap, diagnostics);
+
+        Assert.Equal(0m, result.Dividends.Sum(r => r.CreditableWithholdingPln));
+        var diagnostic = Assert.Single(diagnostics, d => d.Code == DiagnosticCodes.AmbiguousMatch);
+        Assert.Equal(15m, diagnostic.UnresolvedAmountPln);
+        Assert.Contains("names no interest period", diagnostic.Message);
+
+        // With the period on both sides the same rows match without doubt.
+        var withPeriod = await NewCalculator().CalculateAsync(
+            [dividends[0] with { Reference = "JAN-2025" }, dividends[1] with { Reference = "DEC-2024" }],
+            [taxes[0] with { Reference = "JAN-2025" }], null, CreditMethod.TreatyCap, []);
+        Assert.Equal(15m, withPeriod.Dividends.Single(d => d.AmountOriginal == 100m).CreditableWithholdingPln);
+        Assert.Equal(0m, withPeriod.Dividends.Single(d => d.AmountOriginal == 50m).CreditableWithholdingPln);
     }
 
     [Fact]
@@ -116,8 +147,12 @@ public class WithholdingAttributionTests
     }
 
     [Fact]
-    public async Task TotalCreditNeverExceedsTheTaxActuallyWithheld()
+    public async Task ExcessRefundStaysWithItsPaymentAndIsNeverOffsetAgainstOtherPayments()
     {
+        // Earlier versions took the excess of a refund off other payments of the same instrument and then off other
+        // instruments, so that the total credit never exceeded the net tax withheld. That moved money between
+        // payments without evidence of a link; now the excess is reported as unresolved and the other payments keep
+        // their own withholding.
         var august = new DateTime(2025, 8, 15);
         var dividends = new List<RawDividend>
         {
@@ -128,20 +163,23 @@ public class WithholdingAttributionTests
         var taxes = new List<RawWithholdingTax>
         {
             new("AAPL", "USD", Day, 15m, Aapl),
-            new("AAPL", "USD", Day, -40m, Aapl),   // refund larger than everything withheld on AAPL
+            new("AAPL", "USD", Day, -40m, Aapl),   // refund larger than everything withheld on AAPL in May
             new("AAPL", "USD", august, 15m, Aapl),
             new("MSFT", "USD", august, 15m, "US5949181045")
         };
-        var warnings = new List<string>();
+        var diagnostics = new List<TaxDiagnostic>();
 
-        var results = await NewCalculator().CalculateAsync(dividends, taxes, warnings);
+        var result = await NewCalculator().CalculateAsync(dividends, taxes, null, CreditMethod.TreatyCap, diagnostics);
+        var results = result.Dividends;
 
-        var actuallyWithheldPln = taxes.Sum(t => t.Amount) * 4m; // 5 USD = 20 PLN
-        Assert.Equal(20m, actuallyWithheldPln);
-        Assert.Equal(20m, results.Sum(r => r.WithholdingTaxPln));
-        Assert.True(results.Sum(r => r.CreditableWithholdingPln) <= actuallyWithheldPln);
+        Assert.Equal(0m, results[0].WithholdingTaxPln);     // 15 - 40 < 0: nothing left to credit in May
+        Assert.Equal(60m, results[1].WithholdingTaxPln);    // August AAPL untouched
+        Assert.Equal(60m, results[2].WithholdingTaxPln);    // MSFT untouched
         Assert.All(results, r => Assert.True(r.WithholdingTaxPln >= 0m && r.CreditableWithholdingPln >= 0m));
-        Assert.Contains("refund for AAPL", Assert.Single(warnings));
+        var excess = Assert.Single(diagnostics, d => d.Code == DiagnosticCodes.ExcessRefund);
+        Assert.Equal(100m, excess.UnresolvedAmountPln);     // 25 USD x 4
+        Assert.True(excess.BlocksFiling);
+        Assert.DoesNotContain("offset", excess.Message);
     }
 
     [Fact]

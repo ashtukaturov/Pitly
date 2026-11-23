@@ -51,6 +51,17 @@ public static class SessionEndpoints
             return Results.Ok(session.Dividends);
         });
 
+        group.MapGet("/withholding-events", async (Guid sessionId, AppDbContext db) =>
+        {
+            var session = await db.Sessions.Include(s => s.WithholdingEvents)
+                .FirstOrDefaultAsync(s => s.Id == sessionId);
+
+            if (session is null)
+                return Results.NotFound(new { error = "Session not found" });
+
+            return Results.Ok(session.WithholdingEvents.OrderBy(e => e.Date).ThenBy(e => e.Id).Select(EntityMapper.ToWithholdingEvent));
+        });
+
         group.MapGet("/summary", async (Guid sessionId, AppDbContext db) =>
         {
             var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);

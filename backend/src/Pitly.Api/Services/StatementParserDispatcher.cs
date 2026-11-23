@@ -1,5 +1,6 @@
 using Pitly.Broker.Generic;
 using Pitly.Broker.InteractiveBrokers;
+using Pitly.Broker.Revolut;
 using Pitly.Broker.Trading212;
 using Pitly.Core.Models;
 using Pitly.Core.Parsing;
@@ -11,17 +12,23 @@ namespace Pitly.Api.Services;
 public class StatementParserDispatcher : IStatementParser
 {
     private readonly InteractiveBrokersStatementParser _ibParser;
+    private readonly InteractiveBrokersFlexParser _flexParser;
     private readonly Trading212StatementParser _t212Parser;
     private readonly GenericCsvStatementParser _genericParser;
+    private readonly RevolutSavingsStatementParser _revolutParser;
 
     public StatementParserDispatcher(
         InteractiveBrokersStatementParser ibParser,
+        InteractiveBrokersFlexParser flexParser,
         Trading212StatementParser t212Parser,
-        GenericCsvStatementParser genericParser)
+        GenericCsvStatementParser genericParser,
+        RevolutSavingsStatementParser revolutParser)
     {
         _ibParser = ibParser;
+        _flexParser = flexParser;
         _t212Parser = t212Parser;
         _genericParser = genericParser;
+        _revolutParser = revolutParser;
     }
 
     public ParsedStatement Parse(string content) => Select(content).Parse(content);
@@ -44,8 +51,14 @@ public class StatementParserDispatcher : IStatementParser
         if (string.Equals(Clean(firstField), "Action", StringComparison.OrdinalIgnoreCase))
             return _t212Parser;
 
+        if (InteractiveBrokersFlexParser.Detect(firstLine))
+            return _flexParser;
+
         if (GenericCsvStatementParser.DetectKind(firstLine) is not null)
             return _genericParser;
+
+        if (RevolutSavingsStatementParser.Detect(content))
+            return _revolutParser;
 
         if (firstLine.Contains("Statement,", StringComparison.Ordinal) ||
             firstLine.Contains("Trades,", StringComparison.Ordinal) ||
@@ -54,7 +67,7 @@ public class StatementParserDispatcher : IStatementParser
             return _ibParser;
 
         throw new FormatException(
-            "Unrecognized file format. Please upload an Interactive Brokers or Trading 212 CSV export, " +
-            "or a file filled in from the generic trades or income template.");
+            "Unrecognized file format. Please upload an Interactive Brokers Activity Statement or Flex Query CSV, a Trading 212 CSV export, " +
+            "a Revolut savings statement CSV, or a file filled in from the generic trades or income template.");
     }
 }

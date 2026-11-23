@@ -6,8 +6,9 @@ this file is the one to keep up to date.
 
 ## What this project is
 
-Pitly turns broker CSV statements (Interactive Brokers, Trading 212, and the generic trades and income templates
-for any other broker) into the values a Polish tax resident enters in the PIT-38 return and its PIT/ZG annex. A .NET 10 Minimal API does all the tax arithmetic; a React 19 app
+Pitly turns broker CSV statements (Interactive Brokers Activity Statements and Flex Queries, Trading 212, Revolut
+savings statements, and the generic trades and income templates for any other broker) into the values a Polish tax
+resident enters in the PIT-38 return and its PIT/ZG annex. A .NET 10 Minimal API does all the tax arithmetic; a React 19 app
 uploads the files and shows the result in English, Ukrainian and Polish.
 
 The numbers end up in a real tax return. A change that looks right but is off by one grosz, one field number or
@@ -34,7 +35,10 @@ one account is a bug, so every behaviour below is pinned by a test with a hand-c
 7. **A tax rule needs a source.** When you change how something is taxed, cite the statute article or the
    Ministry of Finance document in a code comment and add a test whose expected value you computed by hand.
 8. **Never guess when data is missing.** Incomplete purchase history, an unmatched withholding row or an old
-   stored session that cannot be rebuilt exactly produce a warning or a re-import flag, not an estimate.
+   stored session that cannot be rebuilt exactly produce a warning or a re-import flag, not an estimate. A
+   withholding row is tied to a payment only by the broker's own id or by a complete, unambiguous match inside
+   one account; an excess refund never moves to another payment, and a finding that affects the amounts carries
+   a `TaxDiagnostic` with a code and the unresolved amount, which makes the result "not ready to file".
 9. **Local deployment stays local.** Docker publishes ports on `127.0.0.1` only, and the upload limit is the same
    in the API and in both Nginx configs. `UploadLimitTests` checks both.
 10. **Git.** Commit, push and open pull requests only when the person you work for asks.
@@ -74,13 +78,14 @@ its DLLs.
 ```
 backend/
   src/Pitly.Core/                       tax logic, no I/O except the NBP rate client
-    Models/                             ParsedStatement, Trade, Pit38Fields, Pit38FormLayout, TaxSummary
+    Models/                             ParsedStatement, Trade, Pit38Fields, Pit38FormLayout, TaxSummary, TaxDiagnostic, WithholdingEvent
     Parsing/StatementMerger.cs          accounts, duplicate rows, merging several files
-    Tax/                                FIFO, dividends and withholding, prior-year losses, treaty rates
+    Tax/                                FIFO, WithholdingMatcher (events to payments over the whole history), dividends, prior-year losses, treaty rates, CalculationPolicy
     Services/NbpExchangeRateService.cs  official NBP mid rates
-  src/Pitly.Broker.InteractiveBrokers/  IB Activity Statement parser and corporate actions
+  src/Pitly.Broker.InteractiveBrokers/  IB Activity Statement parser, Flex Query CSV parser, corporate actions
   src/Pitly.Broker.Trading212/          Trading 212 history export parser
   src/Pitly.Broker.Generic/             generic trades and income CSV templates (one account per broker column)
+  src/Pitly.Broker.Revolut/             Revolut consolidated savings statement (interest only)
   src/Pitly.Api/                        endpoints, import service, SQLite storage, schema upgrade
   tests/Pitly.Tests/                    xUnit: unit tests and end-to-end tests through the real API
 frontend/

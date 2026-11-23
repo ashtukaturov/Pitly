@@ -87,10 +87,12 @@ There are no EF migrations; an existing `pitly.db` is upgraded on start.
 
 - A note about the import (a skipped duplicate file, an ignored row) goes to the statement's `Warnings` and is
   shown on the dashboard.
-- A warning that puts the declared amounts in doubt must also reach `TaxSummary.ResultWarnings`, which becomes
-  `Pit38Fields.DataWarnings` and is shown at the top of the PIT-38 page and in the printout, also for a reopened
-  session. The calculators add to the warning lists that `TaxCalculator` passes them; a warning produced during
-  merging is recognised by its prefix (`StatementMerger.AccountCheckPrefix`).
+- A warning that puts the declared amounts in doubt is a `TaxDiagnostic` with `AffectsAmounts = true`, a code
+  from `DiagnosticCodes` (add one there when none fits, with a `diag.code.<CODE>` label in `i18n/diagnostics.ts`
+  in all three languages), the account, the source file, the affected years and the unresolved PLN amount. The
+  calculators add to the diagnostics list that `TaxCalculator` passes them; parsers and the merger put theirs in
+  `ParsedStatement.Diagnostics`. `TaxSummary.ResultWarnings` and `Pit38Fields.DataWarnings` are derived from the
+  messages, so the old string lists stay in step and a reopened session shows the same findings.
 - Backend warnings are English sentences that name the instrument, the date and the account, so the user can
   find the row in the statement.
 - Add an assertion on `dataWarnings` to an end-to-end test, including a `GET /api/session/{id}/pit38` after the

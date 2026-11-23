@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Pitly.Api.Data;
 using Pitly.Core.Models;
 using Pitly.Core.Tax;
@@ -7,8 +8,11 @@ namespace Pitly.Api.Mapping;
 
 public static class EntityMapper
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { Converters = { new JsonStringEnumConverter() } };
+
     public static SessionEntity ToSessionEntity(TaxSummary summary)
     {
+        var pit38 = Pit38Fields.FromSummary(summary);
         return new SessionEntity
         {
             Id = Guid.NewGuid(),
@@ -23,7 +27,7 @@ public static class EntityMapper
             TotalWithholdingPln = summary.TotalWithholdingPln,
             TotalCreditableWithholdingPln = summary.TotalCreditableWithholdingPln,
             DividendTaxOwedPln = summary.DividendTaxOwedPln,
-            PriorYearLossPln = Pit38Fields.FromSummary(summary).StratyZLatUbieglych,
+            PriorYearLossPln = pit38.StratyZLatUbieglych,
             PriorYearLossesJson = PriorYearLossJson.Serialize(summary.PriorYearLosses),
             WarningsJson = summary.Warnings is { Count: > 0 } ? JsonSerializer.Serialize(summary.Warnings) : null,
             ResultWarningsJson = JsonSerializer.Serialize(summary.ResultWarnings ?? []),
@@ -32,6 +36,11 @@ public static class EntityMapper
             TotalInterestCreditableWithholdingPln = summary.TotalInterestCreditableWithholdingPln,
             DataVersion = DbSchemaUpgrader.CurrentDataVersion,
             NeedsReimport = false,
+            DiagnosticsJson = JsonSerializer.Serialize(summary.Diagnostics ?? [], JsonOptions),
+            SourceFilesJson = JsonSerializer.Serialize(summary.SourceFiles ?? [], JsonOptions),
+            RulesVersion = RuleVersions.Rules + "/rounding-" + RoundingPolicy.Current.Version,
+            FormVersion = pit38.Form?.Version,
+            CreditMethod = summary.CreditMethod.ToString(),
             TradeResults = summary.TradeResults.Select(t => new TradeResultEntity
             {
                 Symbol = t.Symbol,
@@ -66,7 +75,35 @@ public static class EntityMapper
                 ExchangeRate = d.ExchangeRate,
                 RateUnavailable = d.RateUnavailable,
                 Isin = d.Isin,
-                CountryCode = d.CountryCode
+                CountryCode = d.CountryCode,
+                AccountId = d.AccountId,
+                TransactionId = d.TransactionId,
+                ActionId = d.ActionId,
+                SourceFile = d.SourceFile,
+                WithholdingSource = d.WithholdingSource
+            }).ToList(),
+            WithholdingEvents = (summary.WithholdingEvents ?? []).Select(e => new WithholdingEventEntity
+            {
+                AccountId = e.AccountId,
+                Symbol = e.Symbol,
+                Isin = e.Isin,
+                Currency = e.Currency,
+                Kind = e.Kind.ToString(),
+                Amount = e.Amount,
+                Date = e.Date,
+                BookingDate = e.BookingDate,
+                SourceStatementYear = e.SourceStatementYear,
+                TransactionId = e.TransactionId,
+                ActionId = e.ActionId,
+                Reference = e.Reference,
+                SourceFile = e.SourceFile,
+                RawType = e.RawType,
+                RawDescription = e.RawDescription,
+                Status = e.Status.ToString(),
+                MatchedPayment = e.MatchedPayment,
+                AmountPln = e.AmountPln,
+                UnresolvedAmountPln = e.UnresolvedAmountPln,
+                DiagnosticCode = e.DiagnosticCode
             }).ToList()
         };
     }
@@ -82,6 +119,7 @@ public static class EntityMapper
     {
         var taxPeriod = ToTaxPeriod(session);
         var warnings = DeserializeWarnings(session.WarningsJson);
+        var diagnostics = Deserialize<List<TaxDiagnostic>>(session.DiagnosticsJson) ?? [];
         return new TaxSummary(
             session.TotalProceedsPln, session.TotalCostPln,
             session.CapitalGainPln, session.CapitalGainTaxPln,
@@ -99,12 +137,38 @@ public static class EntityMapper
             // recognised by its fixed prefix.
             ResultWarnings: session.ResultWarningsJson is null
                 ? warnings.Where(w => w.StartsWith(CapitalGainsTaxCalculator.PositionCheckPrefix, StringComparison.Ordinal)).ToList()
-                : DeserializeWarnings(session.ResultWarningsJson));
+                : DeserializeWarnings(session.ResultWarningsJson),
+            Diagnostics: diagnostics,
+            CreditMethod: Enum.TryParse<CreditMethod>(session.CreditMethod, out var method) ? method : CreditMethod.TreatyCap,
+            SourceFiles: Deserialize<List<SourceFile>>(session.SourceFilesJson));
     }
 
     /// <summary>PIT-38 of a stored session: the same calculation as right after the import.</summary>
     public static Pit38Fields ToPit38(SessionEntity session)
-        => Pit38Fields.FromSummary(ToSummary(session)) with { NeedsReimport = session.NeedsReimport };
+    {
+        var pit38 = Pit38Fields.FromSummary(ToSummary(session));
+        if (!session.NeedsReimport)
+            return pit38;
+
+        var reimport = new TaxDiagnostic(DiagnosticCodes.ReimportRequired, DiagnosticSeverity.Error,
+            "This session was saved by an older version of Pitly (data version " + session.DataVersion + ", rules " + (session.RulesVersion ?? "unversioned") + "). " +
+            "The stored data is not enough to rebuild the amounts with the current rules; import the statements again.",
+            AffectedYears: [session.Year], AffectsAmounts: true);
+        return pit38 with
+        {
+            NeedsReimport = true,
+            ReadyToFile = false,
+            Diagnostics = (pit38.Diagnostics ?? []).Prepend(reimport).ToList()
+        };
+    }
+
+    public static WithholdingEvent ToWithholdingEvent(WithholdingEventEntity e) => new(
+        e.AccountId, e.Symbol, e.Isin, e.Currency,
+        Enum.TryParse<IncomeKind>(e.Kind, out var kind) ? kind : IncomeKind.Unknown,
+        e.Amount, e.Date, e.BookingDate, e.SourceStatementYear, e.TransactionId, e.ActionId, e.Reference,
+        e.SourceFile, e.RawType, e.RawDescription,
+        Enum.TryParse<WithholdingEventStatus>(e.Status, out var status) ? status : WithholdingEventStatus.Unresolved,
+        e.MatchedPayment, e.AmountPln, e.UnresolvedAmountPln, e.DiagnosticCode);
 
     public static object ToSummaryResponse(SessionEntity session) => ToSummaryResponse(ToSummary(session), ToPit38(session));
 
@@ -129,35 +193,29 @@ public static class EntityMapper
             summary.TaxableTo,
             PriorYearLossPln = pit38.StratyZLatUbieglych,
             Warnings = summary.Warnings ?? [],
-            pit38.NeedsReimport
+            pit38.NeedsReimport,
+            pit38.ReadyToFile,
+            pit38.UnresolvedAmountPln,
+            CreditMethod = summary.CreditMethod.ToString(),
+            SourceFiles = summary.SourceFiles ?? []
         };
     }
 
-    public static List<CountryIncome> DeserializeCountries(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
-        try
-        {
-            return JsonSerializer.Deserialize<List<CountryIncome>>(json) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
+    public static List<CountryIncome> DeserializeCountries(string? json) => Deserialize<List<CountryIncome>>(json) ?? [];
 
-    public static List<string> DeserializeWarnings(string? json)
+    public static List<string> DeserializeWarnings(string? json) => Deserialize<List<string>>(json) ?? [];
+
+    private static T? Deserialize<T>(string? json) where T : class
     {
         if (string.IsNullOrWhiteSpace(json))
-            return [];
+            return null;
         try
         {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+            return JsonSerializer.Deserialize<T>(json, JsonOptions);
         }
         catch (JsonException)
         {
-            return [];
+            return null;
         }
     }
 }

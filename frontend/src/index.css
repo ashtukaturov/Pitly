@@ -19,6 +19,10 @@ body {
   .no-print {
     display: none !important;
   }
+  /* Notes behind a toggle on screen are part of the printed report. */
+  .print-block {
+    display: block !important;
+  }
   /* Result warnings are part of the printed report: dark text and a visible border on white paper. */
   .print-warning,
   .print-warning * {

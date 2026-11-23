@@ -19,6 +19,22 @@ Each amount is converted at the NBP mid rate of the last business day before the
 ust. 1 and 2 ustawy o PIT). The trade date is used, not the settlement date; the README lists this as a
 limitation.
 
+Tax paid abroad is converted at the rate of the day before it was paid (art. 11a ust. 3: "zapłaty podatku").
+Tax withheld on the day of the payment therefore shares the payment's rate. Tax paid or re-charged on another day
+(IB Flex `Date/Time`, or an explicit booking date) is converted at the rate of its own day and the result notes
+it (`RATE_DATE`). A refund is netted against the tax it refunds in the currency of the tax before conversion, so
+a full refund leaves exactly zero whatever the rates; the remaining tax is valued at the original rate.
+**Interpretation:** the law names the day of payment; valuing a refund at the original rate is Pitly's choice
+to keep "refunded in full" and "zero credit" the same thing.
+
+## Precision
+
+Every PLN amount keeps its full precision through the calculation and in the stored session. Rounding happens
+once, in `Pit38Fields.FromSummary`, by the rule of each field. Control example: 0.01 EUR of interest at a fixed
+test rate of 10.51 PLN/EUR is 0.1051 PLN; 19% of it is 0.019969 PLN, entered as 0.02 PLN (grosz upward). Rounding
+the income to 0.11 PLN first would give 0.0209 PLN, entered as 0.03 PLN, which is wrong. (10.51 is a test rate,
+not a quotation.)
+
 ## Capital gains (art. 30b)
 
 - Income is proceeds minus costs. Proceeds are entered gross; buy and sell commissions are costs.
@@ -56,24 +72,104 @@ up. The tax is 19% of the base, and the tax due ("Podatek należny") is rounded 
 
 ## Dividends, interest and payments in lieu (art. 30a)
 
-- Foreign dividends are taxed at a flat 19% (art. 30a ust. 1 pkt 4). Credit interest on cash and IB payments in
-  lieu of dividends are treated as flat-tax income of the same field. Debit (margin) interest is ignored.
+- Foreign dividends are taxed at a flat 19% (art. 30a ust. 1 pkt 4). Credit interest on cash, bank interest
+  (Revolut savings) and bond interest are interest under art. 30a ust. 1 pkt 2-3; IB payments in lieu of dividends
+  are treated as flat-tax income of the same field. Debit (margin) interest is ignored.
 - **Interpretation:** how payments in lieu should be classified is not settled in Polish practice. The UI flags
-  them.
+  them (`CLASSIFICATION_UNVERIFIED`). The same flag marks bond interest and interest that carries an ISIN: a
+  broker's label "interest" is not a legal classification, and securities-lending income is not classified by
+  Pitly either.
 - IB lists some payments in lieu inside the `Dividends` section, with the tax row labelled "Payment in Lieu of
   Dividend - US Tax". The parser classifies by the description so that both sides get the same kind; otherwise
   that withholding would match no payment and its credit would be lost.
 
 ### Foreign tax credit (art. 30a ust. 9)
 
-- Tax withheld abroad is credited only up to the rate of the double-tax treaty with the issuer's country, taken
-  from the ISIN prefix (`TreatyWithholdingRates`: 15% for US, 10% for GB, and so on). Tax withheld above that
-  rate is shown but not credited, because it has to be reclaimed abroad.
+- Tax withheld abroad on dividends is credited only up to the rate of the double-tax treaty with the issuer's
+  country, taken from the ISIN prefix (`TreatyWithholdingRates`: 15% for US, 10% for GB, and so on). Tax withheld
+  above that rate is shown but not credited, because it has to be reclaimed abroad. This is the position of the
+  Ministry of Finance (Broszura PIT-38, part G) and of KIS rulings on 30% US withholding without a W-8BEN.
 - Without an ISIN or a treaty rate on file, the statutory cap of 19% applies.
-- The credit never exceeds the Polish flat tax on the same stream, and the total credit never exceeds the tax
-  actually withheld after refunds and corrections.
+- The treaty rates on file are dividend rates. Interest keeps the statutory 19% cap whatever ISIN the row
+  carries; the treaty articles on interest are not modelled.
+- The credit never exceeds the Polish flat tax on the same stream.
+- **Comparison method.** `CreditMethod.StatutoryCap` credits the tax actually paid up to 19% of each payment,
+  the literal reading of art. 30a ust. 9 followed by several NSA rulings. It is never the default, has to be
+  chosen on the import page, is recorded with the session and shown next to the result (`CREDIT_METHOD`).
+  An older session is never switched to it.
 - **Limitation:** the ISIN prefix is a proxy. A depositary receipt carries the ISIN of the depositary's country
   while the dividend is taxed in the company's country.
+
+### Attribution of withholding events
+
+Every withholding row of every uploaded statement is one event: tax withheld (positive), refunded or reversed
+(negative), with its account, the date the broker refers it to, its booking date or statement year, the broker's
+ids and text. Events are tied to payments over the whole uploaded history first; the tax year is selected
+afterwards. Inside one account, in this order:
+
+1. the broker's own link: the same `ActionID` on payment and tax row (IB Flex);
+2. a complete match: same kind of income, same instrument (ISIN against ISIN, ticker against ticker, never one
+   against the other), same reference date, same currency. For credit interest the instrument is the currency and
+   the reference is the interest period when both rows name one (`CREDIT INT FOR JAN-2025`); a tax row for another
+   period does not match;
+3. the same match in another currency, when exactly one payment fits.
+
+Several dividend rows of one instrument, account, pay date and currency are one distribution event; one tax row
+of that event is shared between them in proportion to their gross amounts and the sharing is noted
+(`SHARED_WITHHOLDING`; the total credit does not depend on the split). Interest rows are never shared: a tax row
+that fits two interest rows is unresolved.
+
+Anything else is unresolved and reported with the amount that is therefore not in the declared figures:
+`UNMATCHED_WHT` (no payment fits; the message says whether the instrument is in the history at all, so "statement
+not uploaded" is only said when the payment really is absent), `AMBIGUOUS_MATCH` (several fit),
+`UNKNOWN_INCOME_KIND` (the row names neither an instrument nor interest). Nothing is attributed by proximity and
+nothing is split by assumption. Unmatched rows that cancel each other out (a booking and its reversal of a
+payment that was itself reversed) are only noted.
+
+Control examples (USD at 4 PLN, PLN at 1):
+
+| Input | Expected |
+|---|---|
+| IB: PLN 100 `CREDIT INT FOR JAN-2025` and PLN -10 `WITHHOLDING @ 10% ON CREDIT INT FOR JAN-2025`, no ISIN on either. | Interest 100, withheld and credited 10, flat tax 19, difference 9.00 PLN, nothing unresolved. |
+| The same, but the tax row names `FEB-2025`. | Credit 0; `UNMATCHED_WHT` with 15 PLN unresolved; not ready to file. |
+| Two interest rows of one day and currency without a period, one tax row without a period (possible in a Flex Query or a generic file). | Credit 0; `AMBIGUOUS_MATCH` naming the 2 candidates. |
+| A withholding row `WITHHOLDING ON SOMETHING ELSE` without ISIN. | `UNKNOWN_INCOME_KIND`; the amount is not credited. |
+
+### Refunds and corrections
+
+A refund is netted against the tax it refunds on the payment it points at. A refund larger than that tax leaves
+a credit of 0 on the payment and an `EXCESS_REFUND` finding with the excess; the excess is never taken off
+another payment, account or instrument, because nothing in the statement proves which other payment it belongs
+to. (Earlier versions did offset it, first within the instrument, then anywhere, to keep the total credit at or
+below the net tax withheld; that moved money between payments without evidence of a link and is gone.)
+
+An event booked in another year than its payment (an Activity Statement of year N+1 that dates the refund back to
+the dividend of year N; a Flex row of year N+1 with the `ActionID` of a year-N dividend) stays with the payment,
+so the credit of year N already reflects it, and is reported as `CROSS_YEAR_ADJUSTMENT` for both years with the
+amount. **Open question:** whether the tax effect of such a refund belongs to year N (a corrected return) or to
+year N+1 is not decided by Pitly. Art. 45 ust. 3a ustawy o PIT (adding back a deduction that was later refunded
+in the year of the refund) is the candidate rule for year N+1, and a correction of year N is the alternative; the
+IBKR reclassification notice (https://www.interactivebrokers.com/support/faq/content/dividend-income-reclassification-1055108870)
+describes a correction of the original document, which is not the same thing as a refund of tax already
+credited. Until this is confirmed, the row is attributed, flagged and counted as unresolved; the user confirms
+the treatment before filing either year.
+
+Control examples (USD at 4 PLN):
+
+| Input | Expected |
+|---|---|
+| A: dividend 100 PLN, 15 withheld, 20 refunded. B (another account, another instrument): dividend 100 PLN, 15 withheld. | B keeps 15 credited; A's credit is 0; `EXCESS_REFUND` 5 PLN on account A; not ready to file. |
+| 2024: dividend 100 PLN with 15 withheld. 2025 statement: refund of 15 dated back to the 2024 payment, plus another dividend 100 PLN with 15 withheld. | 2025: the other dividend keeps 15 credited, `CROSS_YEAR_ADJUSTMENT` for 2024 and 2025 with 15 PLN. 2024: credit 0, difference 19 PLN. |
+| Only the 2025 statement is uploaded. | `UNMATCHED_WHT`: the refund points at a 2024 payment that is not in the history; the other dividend is untouched. |
+| Two dividends of 100 USD with 15 USD withheld each; the next year's statement refunds 20 USD dated back to the first. | First credit 0, second 60 PLN, `EXCESS_REFUND` 20 PLN, `CROSS_YEAR_ADJUSTMENT` 80 PLN; not ready to file. |
+
+### Readiness
+
+A finding with `AffectsAmounts` that is at least a warning blocks filing: `Pit38Fields.ReadyToFile` is false and
+`UnresolvedAmountPln` sums the money that is not in the declared figures. The dashboard, the PIT-38 page and the
+printout show the same banner and the same list; informational notes (`SHARED_WITHHOLDING`,
+`MIXED_STREAM_ROUNDING`, `RATE_DATE`, `OVERLAP_SKIPPED`, `CREDIT_METHOD`, `CLASSIFICATION_UNVERIFIED`) do not
+block. A session flagged `NeedsReimport` is never ready (`REIMPORT_REQUIRED`).
 
 Control examples (USD at 4 PLN):
 
@@ -100,7 +196,12 @@ Control example, tax year 2025: dividends 103 PLN, creditable tax paid abroad 15
 (poz. 47), paid abroad 15.10 (poz. 48), difference 4.47, entered as 4 (poz. 49).
 
 **Interpretation:** the form has one field for dividends and interest together and the Ministry gives no rule
-for a mix. Pitly rounds each stream by its own rule and adds the results.
+for a mix. Pitly rounds each stream by its own rule and adds the results. This is stated as an assumption in
+`RoundingPolicy.Current` (version `2025.1`, with the sources above), returned with every result, printed under
+section G and noted as `MIXED_STREAM_ROUNDING` whenever a year has both streams.
+
+Control examples: 103 PLN of dividends with 15.10 PLN withheld give a difference of 4 PLN; 100 PLN of bank
+interest with 10 PLN withheld give 9.00 PLN; both together give 13.00 PLN.
 
 ## Form versions and field numbers
 
@@ -138,9 +239,23 @@ When the capital-gains tax base exceeds 1 000 000 PLN, 4% of the excess is shown
 declared on DSF-1. Prior-year losses reduce the base. Art. 30a income is not included. Only income known to
 Pitly counts, while the real threshold also covers employment and business income.
 
+## Revolut savings statements
+
+Only the `Interest earned` rows of the consolidated statement are income (art. 30a ust. 1 pkt 3); deposits,
+withdrawals, transfers and balances are the user's own money. The summary's "Interest earned" is compared with
+the rows and a difference is reported (`SUMMARY_MISMATCH`). The statement names no source country, and the
+currency is not one: the interest falls under the unknown country in PIT/ZG unless the user enters it through the
+generic income template with a `country`. Revolut pays this interest gross; a tax row, if a statement ever has
+one, is kept as an interest withholding event of the same day and currency.
+
+Control example: deposit 100 EUR, interest 0.01 EUR, withdrawal 100.01 EUR give an income of 0.01 EUR, not 100.01
+and not 200.02; the same rows entered in the generic income template give the same payments and the same fields.
+
 ## What the code does not do
 
-- Instruments other than stocks and ETFs (options, futures, bonds, forex, crypto).
+- Instruments other than stocks and ETFs (options, futures, bonds as trades, forex, crypto).
+- Decide the tax year of a cross-year refund or re-charge (see "Refunds and corrections").
+- Classify securities-lending income and payments in lieu with legal certainty.
 - Settlement-date conversion.
 - Domestic income reported in PIT-8C (those fields are left for the user).
 - Electronic submission.

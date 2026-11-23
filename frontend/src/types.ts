@@ -42,6 +42,12 @@ export interface DividendResult {
   isin?: string | null;
   /** Source country named by the statement (generic CSV); null when PIT/ZG uses the ISIN prefix. */
   countryCode?: string | null;
+  accountId?: string | null;
+  transactionId?: string | null;
+  actionId?: string | null;
+  sourceFile?: string | null;
+  /** How the withholding of this row was established: "same row", "matched", "shared" or "none". */
+  withholdingSource?: string | null;
 }
 
 /** One PIT/ZG row: income attributed to the source country (the statement's country column, else the ISIN prefix). */
@@ -58,6 +64,73 @@ export interface CountryIncome {
   withholdingPln: number;
   creditableWithholdingPln: number;
   dividendCount: number;
+}
+
+/** How much a finding matters: Info explains, Warning needs a check, Error means the data cannot be used as it is. */
+export type DiagnosticSeverity = 'Info' | 'Warning' | 'Error';
+
+/** One structured finding (backend TaxDiagnostic). The message is English; the code is translated by the UI. */
+export interface TaxDiagnostic {
+  code: string;
+  severity: DiagnosticSeverity;
+  message: string;
+  source?: string | null;
+  accountId?: string | null;
+  affectedYears?: number[] | null;
+  /** Money that is not in the declared amounts because of this finding. */
+  unresolvedAmountPln?: number | null;
+  /** True when the declared amounts cannot be called final until this is resolved. */
+  affectsAmounts: boolean;
+  /** affectsAmounts and at least a warning. */
+  blocksFiling: boolean;
+}
+
+/** The rounding rules applied to section G, with their version and sources (backend RoundingPolicy). */
+export interface RoundingPolicy {
+  version: string;
+  dividendRule: string;
+  interestRule: string;
+  mixedRule: string;
+  mixedRuleIsAssumption: boolean;
+  sources: string[];
+}
+
+/** How the foreign tax credit is limited: the treaty cap (default, MF/KIS) or the statutory 19% cap (NSA comparison). */
+export type CreditMethod = 'TreatyCap' | 'StatutoryCap';
+
+/** One withholding event of the tax year and what the calculation did with it (backend WithholdingEvent). */
+export interface WithholdingEvent {
+  accountId?: string | null;
+  symbol: string;
+  isin?: string | null;
+  currency: string;
+  kind: IncomeKind | 'Unknown';
+  /** Signed in the broker's currency: positive = withheld, negative = refunded. */
+  amount: number;
+  date: string;
+  bookingDate?: string | null;
+  sourceStatementYear?: number | null;
+  transactionId?: string | null;
+  actionId?: string | null;
+  reference?: string | null;
+  sourceFile?: string | null;
+  rawType?: string | null;
+  rawDescription?: string | null;
+  status: 'Matched' | 'Shared' | 'Unresolved';
+  matchedPayment?: string | null;
+  amountPln: number;
+  unresolvedAmountPln: number;
+  diagnosticCode?: string | null;
+}
+
+/** One uploaded file as the session remembers it: its hash and what it was read as. */
+export interface SourceFile {
+  name: string;
+  sha256: string;
+  broker?: string | null;
+  account?: string | null;
+  statementYear?: number | null;
+  parserVersion?: string | null;
 }
 
 export interface TaxSummary {
@@ -78,6 +151,11 @@ export interface TaxSummary {
   /** Parser warnings: corporate actions handled with a conservative assumption, ignored rows, etc. */
   warnings: string[];
   needsReimport?: boolean;
+  /** False while a finding says the amounts cannot be called final. */
+  readyToFile?: boolean;
+  unresolvedAmountPln?: number;
+  creditMethod?: CreditMethod;
+  sourceFiles?: SourceFile[];
 }
 
 /** A capital-gains loss from an earlier PIT-38, as entered on the Import page. */
@@ -139,6 +217,14 @@ export interface Pit38Fields {
   dataWarnings: string[];
   // Saved by an older version without the data needed to rebuild the amounts exactly
   needsReimport: boolean;
+  // Every finding with its code, scope and the amount that depends on it; dataWarnings are their messages
+  diagnostics: TaxDiagnostic[];
+  // False while any finding says the declared amounts cannot be called final
+  readyToFile: boolean;
+  // Money that is not in the amounts because of unresolved findings
+  unresolvedAmountPln: number;
+  roundingPolicy: RoundingPolicy | null;
+  creditMethod: CreditMethod;
 }
 
 /** Field numbers (poz.) of one verified PIT-38 form version; mirrors backend Pit38FormLayout. */
@@ -172,6 +258,9 @@ export interface ImportedFile {
   accountKnown: boolean;
   /** The account is named by the statement or was chosen by the user. */
   accountConfirmed: boolean;
+  /** The parser that read the file, with its version (for example "ib-flex-csv/1"). */
+  format?: string | null;
+  sha256?: string | null;
 }
 
 export interface ImportResponse {
@@ -183,6 +272,7 @@ export interface ImportResponse {
   pit38: Pit38Fields;
   trades: TradeResult[];
   dividends: DividendResult[];
+  withholdingEvents: WithholdingEvent[];
 }
 
 export interface TradesPage {
@@ -206,6 +296,10 @@ export interface AppState {
   // Accounts the uploaded files were attributed to, and the user's choice for files without an account number
   importedFiles: ImportedFile[];
   accountLabels: Record<string, string>;
+  // Every withholding event of the selected year with its attribution
+  withholdingEvents: WithholdingEvent[];
+  // How the foreign tax credit is limited; the treaty cap unless the user chose otherwise at import
+  creditMethod: CreditMethod;
 }
 
 /** What the dashboard can ask to recalculate without re-selecting the files. */
@@ -214,4 +308,5 @@ export interface RecalculateOptions {
   residencyStartDate?: string;
   /** For files without an account number: file name -> account label chosen by the user. */
   accountLabels?: Record<string, string>;
+  creditMethod?: CreditMethod;
 }

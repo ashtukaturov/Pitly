@@ -19,4 +19,11 @@ public record Dividend(
     // Issuer ISIN, used to attribute the income to a country for PIT/ZG
     string? Isin = null,
     // Country named by the statement itself; takes precedence over the ISIN prefix for PIT/ZG
-    string? CountryCode = null);
+    string? CountryCode = null,
+    // Provenance: the account, the broker's ids and the file the payment was read from
+    string? AccountId = null,
+    string? TransactionId = null,
+    string? ActionId = null,
+    string? SourceFile = null,
+    // How the withholding of this row was established: "same row", "matched", "shared", "none"
+    string? WithholdingSource = null);

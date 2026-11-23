@@ -1,4 +1,5 @@
 using Pitly.Core.Models;
+using Pitly.Core.Tax;
 
 namespace Pitly.Api.Services;
 
@@ -8,13 +9,15 @@ public interface IImportService
     /// The user's answer for files that carry no account number, keyed by file name: files with the same label are
     /// one account, files with different labels are separate accounts.
     /// </param>
+    /// <param name="creditMethod">How the foreign tax credit is limited; the treaty cap unless the user asks otherwise.</param>
     Task<ImportResult> ImportStatementsAsync(
         IReadOnlyList<Stream> fileStreams,
         DateTime? residencyStartDate = null,
         IReadOnlyList<PriorYearLoss>? priorYearLosses = null,
         int? taxYear = null,
         IReadOnlyList<string>? fileNames = null,
-        IReadOnlyDictionary<string, string>? accountLabels = null);
+        IReadOnlyDictionary<string, string>? accountLabels = null,
+        CreditMethod creditMethod = CreditMethod.TreatyCap);
 }
 
 /// <param name="AvailableYears">Years found anywhere in the upload; any of them can be requested as the tax year.</param>
@@ -28,7 +31,8 @@ public record ImportResult(
 /// <param name="Account">Account the file was attributed to (statement number, user label or the broker default).</param>
 /// <param name="AccountKnown">True when the statement itself names the account.</param>
 /// <param name="AccountConfirmed">True when the statement names the account or the user labelled the file.</param>
-public record ImportedFile(string Name, string? Broker, string Account, bool AccountKnown, bool AccountConfirmed);
+/// <param name="Format">The parser that read the file (its name and version).</param>
+public record ImportedFile(string Name, string? Broker, string Account, bool AccountKnown, bool AccountConfirmed, string? Format = null, string? Sha256 = null);
 
 /// <summary>
 /// The upload was understood but cannot be calculated for the requested year. Carries the years the upload covers

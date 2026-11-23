@@ -63,9 +63,19 @@ internal sealed class IbStatement
         return this;
     }
 
-    public IbStatement Interest(string date, decimal amount, string currency = "USD")
+    public IbStatement Interest(string date, decimal amount, string currency = "USD", string? description = null)
     {
-        _interest.Add($"Interest,Data,{currency},{date},{currency} Credit Interest for the month,{N(amount)}");
+        _interest.Add($"Interest,Data,{currency},{date},{description ?? $"{currency} Credit Interest for the month"},{N(amount)}");
+        return this;
+    }
+
+    /// <summary>
+    /// Tax withheld on credit interest. IB books it in the Withholding Tax section without a ticker or ISIN, e.g.
+    /// "WITHHOLDING @ 10% ON CREDIT INT FOR JAN-2025". A negative <paramref name="withheld"/> is a refund.
+    /// </summary>
+    public IbStatement InterestWithholding(string date, decimal withheld, string currency = "USD", string? description = null)
+    {
+        _withholding.Add($"Withholding Tax,Data,{currency},{date},{description ?? "WITHHOLDING @ 10% ON CREDIT INT FOR THE MONTH"},{N(-withheld)},");
         return this;
     }
 

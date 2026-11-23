@@ -10,6 +10,8 @@ namespace Pitly.Broker.InteractiveBrokers;
 public partial class InteractiveBrokersStatementParser : IStatementParser
 {
     public const string BrokerName = "Interactive Brokers";
+    /// <summary>Name and version of this parser, stored with every session for provenance.</summary>
+    public const string ParserVersion = "ib-activity/2";
 
     private readonly ILogger<InteractiveBrokersStatementParser> _logger;
 
@@ -144,16 +146,20 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         foreach (var fields in carryInRows)
             TryParseCarryInPosition(fields, carryInPositions, symbolToIsin, statementYear);
 
+        // The Activity Statement does not date the booking of a row: a correction of last year's tax is printed
+        // with last year's date. The statement's own year is the only record of when the money moved.
+        var year = statementYear;
         return new ParsedStatement(
             trades,
             NetDividends(dividends),
-            NetWithholdingTaxes(withholdingTaxes),
+            NetWithholdingTaxes(withholdingTaxes).Select(t => t with { SourceStatementYear = year }).ToList(),
             corporateActions,
             carryInPositions,
             statementYear,
             warnings,
             accountId,
-            BrokerName);
+            BrokerName,
+            ParserVersion: ParserVersion);
     }
 
     private void TryParseTrade(
@@ -332,8 +338,9 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         // IB also lists substitute payments in the Dividends section ("... Payment in Lieu of Dividend (Ordinary
         // Dividend)") and labels their tax "... Payment in Lieu of Dividend - US Tax". Both sides must get the same
         // kind, otherwise that withholding matches no payment and its credit is lost.
-        var kind = IsPaymentInLieu(Clean(fields[4])) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
-        dividends.Add(new RawDividend(symbol, currency, date, amount, isin, kind));
+        var description = Clean(fields[4]);
+        var kind = IsPaymentInLieu(description) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
+        dividends.Add(new RawDividend(symbol, currency, date, amount, isin, kind, RawType: "Dividends", RawDescription: description));
     }
 
     private static bool IsPaymentInLieu(string description)
@@ -346,7 +353,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var row = TryParseIncomeRow(fields, "payment in lieu");
         if (row is null) return;
         var (symbol, isin, currency, date, amount) = row.Value;
-        income.Add(new RawDividend(symbol, currency, date, amount, isin, IncomeKind.PaymentInLieu));
+        income.Add(new RawDividend(symbol, currency, date, amount, isin, IncomeKind.PaymentInLieu,
+            RawType: "Payment In Lieu Of Dividends", RawDescription: Clean(fields[4])));
     }
 
     private void TryParseInterest(List<string> fields, List<RawDividend> income)
@@ -383,29 +391,87 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             return;
         }
 
-        income.Add(new RawDividend($"{currency} interest", currency, date, amount, null, IncomeKind.Interest));
+        income.Add(new RawDividend($"{currency} interest", currency, date, amount, null, IncomeKind.Interest,
+            Reference: InterestPeriod(description), RawType: "Interest", RawDescription: description));
     }
 
     private void TryParseWithholdingTax(List<string> fields, List<RawWithholdingTax> taxes)
     {
-        var row = TryParseIncomeRow(fields, "withholding tax");
-        if (row is null) return;
-        var (symbol, isin, currency, date, amount) = row.Value;
+        // CSV: Withholding Tax,Data,Currency,Date,Description,Amount,Code
+        if (fields.Count < 6 || Clean(fields[1]) != "Data") return;
 
-        // IB labels withholding on substitute payments "... Payment in Lieu of Dividend - US Tax".
-        var kind = IsPaymentInLieu(Clean(fields[4])) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
+        var currency = Clean(fields[2]);
+        var dateStr = Clean(fields[3]);
+        var description = Clean(fields[4]);
+        var amountStr = Clean(fields[5]);
 
-        taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin, kind));
+        if (currency.StartsWith("Total", StringComparison.OrdinalIgnoreCase) ||
+            description.Contains("Total", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!TryParseDate(dateStr, out var date))
+        {
+            _logger.LogWarning("Skipping withholding tax row: could not parse date '{DateStr}'", dateStr);
+            return;
+        }
+        if (!TryParseDecimal(amountStr, out var amount))
+        {
+            _logger.LogWarning("Skipping withholding tax row on {Date}: could not parse amount '{AmountStr}'", dateStr, amountStr);
+            return;
+        }
+
+        var instrument = ExtractInstrumentFromDescription(description);
+        if (instrument is not null)
+        {
+            var (symbol, isin) = instrument.Value;
+            // IB labels withholding on substitute payments "... Payment in Lieu of Dividend - US Tax".
+            var kind = IsPaymentInLieu(description) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
+            taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin, kind, RawType: "Withholding Tax", RawDescription: description));
+            return;
+        }
+
+        // Tax withheld on credit interest names no instrument: "WITHHOLDING @ 10% ON CREDIT INT FOR JAN-2025".
+        // The kind comes from the text and the period ties it to the interest row of the same account and currency.
+        if (IsInterestDescription(description))
+        {
+            taxes.Add(new RawWithholdingTax($"{currency} interest", currency, date, amount, null, IncomeKind.Interest,
+                Reference: InterestPeriod(description), RawType: "Withholding Tax", RawDescription: description));
+            return;
+        }
+
+        // Neither an instrument nor interest: kept as an event of unknown kind, which is reported, never guessed.
+        taxes.Add(new RawWithholdingTax(description.Length > 40 ? description[..40] : description, currency, date, amount, null, IncomeKind.Unknown,
+            RawType: "Withholding Tax", RawDescription: description));
     }
+
+    private static bool IsInterestDescription(string description)
+        => InterestDescriptionRegex().IsMatch(description);
+
+    /// <summary>"USD Credit Interest for Feb-2025" / "WITHHOLDING @ 10% ON CREDIT INT FOR JAN-2025" -> "FEB-2025" / "JAN-2025".</summary>
+    private static string? InterestPeriod(string description)
+    {
+        var match = InterestPeriodRegex().Match(description);
+        return match.Success ? match.Groups["month"].Value.ToUpperInvariant() + "-" + match.Groups["year"].Value : null;
+    }
+
+    [GeneratedRegex(@"\b(CREDIT\s+INT(EREST)?|INTEREST|INT)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex InterestDescriptionRegex();
+
+    [GeneratedRegex(@"\bFOR\s+(?<month>[A-Z]{3})-(?<year>\d{4})\b", RegexOptions.IgnoreCase)]
+    private static partial Regex InterestPeriodRegex();
 
     private static List<RawDividend> NetDividends(List<RawDividend> dividends)
     {
         return dividends
-            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind))
-            .Select(g => new RawDividend(g.Key.Symbol, g.Key.Currency, g.Key.Date, g.Sum(d => d.Amount), g.Key.Isin, g.Key.Kind))
+            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind, d.Reference))
+            .Select(g => new RawDividend(g.Key.Symbol, g.Key.Currency, g.Key.Date, g.Sum(d => d.Amount), g.Key.Isin, g.Key.Kind,
+                Reference: g.Key.Reference, RawType: g.First().RawType, RawDescription: Descriptions(g.Select(d => d.RawDescription))))
             .Where(d => d.Amount > 0)
             .ToList();
     }
+
+    private static string Descriptions(IEnumerable<string?> descriptions)
+        => string.Join(" | ", descriptions.Where(d => !string.IsNullOrWhiteSpace(d)).Distinct());
 
     /// <summary>
     /// IB books withholding as a negative cash amount and a later correction as a positive reversal (often in the next
@@ -415,8 +481,9 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
     private static List<RawWithholdingTax> NetWithholdingTaxes(List<RawWithholdingTax> taxes)
     {
         return taxes
-            .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date, t.Kind))
-            .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, -g.Sum(t => t.Amount), g.Key.Isin, g.Key.Kind))
+            .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date, t.Kind, t.Reference))
+            .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, -g.Sum(t => t.Amount), g.Key.Isin, g.Key.Kind,
+                Reference: g.Key.Reference, RawType: "Withholding Tax", RawDescription: Descriptions(g.Select(t => t.RawDescription))))
             .Where(t => t.Amount != 0)
             .ToList();
     }

@@ -17,6 +17,7 @@ public sealed class DbSchemaUpgraderTests : IDisposable
     private static readonly Guid ZeroCredit = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid Insufficient = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid TradesOnly = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid OffsetRefund = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
     public void Dispose()
     {
@@ -111,7 +112,12 @@ public sealed class DbSchemaUpgraderTests : IDisposable
             Session(Insufficient, dividends: "300.0", withholding: "45.0", creditable: "0.0"),
             DividendRow(Insufficient, "Dividend", "300.0", "45.0", "0.0", null),
             // No dividends at all.
-            Session(TradesOnly, dividends: "0.0", withholding: "0.0", creditable: "0.0"));
+            Session(TradesOnly, dividends: "0.0", withholding: "0.0", creditable: "0.0"),
+            // Rows produced by the older matching, which took an excess refund off another payment: the stored
+            // warning says so. Those rows cannot be reinterpreted, so the session must be imported again.
+            Session(OffsetRefund, dividends: "200.0", withholding: "20.0", creditable: "20.0"),
+            DividendRow(OffsetRefund, "Dividend", "200.0", "20.0", "20.0", "0.15"),
+            $"UPDATE Sessions SET WarningsJson = '[\"A withholding-tax refund for X dated 2025-05-15 exceeds the tax withheld on that payment by 20.00 PLN. 20.00 PLN was offset against other X payments.\"]' WHERE Id = '{OffsetRefund.ToString().ToUpperInvariant()}';");
 
         using (var db = NewContext())
             DbSchemaUpgrader.EnsureLatestSchema(db);
@@ -154,6 +160,14 @@ public sealed class DbSchemaUpgraderTests : IDisposable
         Assert.True(EntityMapper.ToPit38(insufficient).NeedsReimport);
 
         Assert.False(sessions[TradesOnly].NeedsReimport);
+
+        var offset = sessions[OffsetRefund];
+        Assert.True(offset.NeedsReimport);
+        var offsetPit38 = EntityMapper.ToPit38(offset);
+        Assert.True(offsetPit38.NeedsReimport);
+        Assert.False(offsetPit38.ReadyToFile);
+        Assert.Contains(offsetPit38.Diagnostics!, d => d.Code == "REIMPORT_REQUIRED");
+
         Assert.All(sessions.Values, s => Assert.Equal(DbSchemaUpgrader.CurrentDataVersion, s.DataVersion));
     }
 

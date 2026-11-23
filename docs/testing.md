@@ -24,7 +24,10 @@ everything visual is checked in the browser.
 | File | What breaks it |
 |---|---|
 | `EndToEndImportTests.cs` | Anything between a CSV and the final PIT-38 fields: per-account FIFO and splits, duplicate uploads, withholding credit, the loss deduction, rounding of section G, the year cut-off, form numbering per year, warnings surviving a reopened session. |
-| `WithholdingAttributionTests.cs` | How withholding is tied to a payment: same-row withholding, other currencies, no crossing between accounts, proportional split, unmatched rows, the cap at tax actually withheld, account labels, operation ids. |
+| `WithholdingAttributionTests.cs` | How withholding is tied to a payment: same-row withholding, other currencies, no crossing between accounts, an ambiguous row left unresolved, interest matched by period, unmatched rows, an excess refund that is never offset elsewhere, account labels, operation ids. |
+| `WithholdingReconciliationTests.cs` | The defects of the 2025 audit, end to end: tax on credit interest without an ISIN, a tax row for another interest period, a row of unknown kind, an excess refund on account A that leaves account B alone, a refund booked next year that stays with last year's payment (both tax years), a refund whose payment is not uploaded, dividend and interest rounding kept apart, 0.01 EUR of interest not rounded before the tax. |
+| `CreditRulesTests.cs` | The rate of the day the tax was paid, a refund netted at the original rate, interest never taking a dividend treaty rate, the statutory-cap comparison method (chosen, recorded, reopened, rejected when invalid), the rounding policy and the source-file provenance in the response. |
+| `FlexAndRevolutImportTests.cs` | The IB Flex Query CSV (sections, signs, accounts, unknown rows, alone and next to the Activity Statement of the same account, partial overlap, the same transaction id on two accounts, a refund linked by `ActionID` across years) and the Revolut savings statement (interest only across currencies, the summary check, unknown rows, the same result as the generic template, a repeated upload in another order). |
 | `CapitalGainsTaxCalculatorTests.cs` | FIFO matching by ISIN, commissions as costs, the buy-date rate for costs, splits, the message for missing history. |
 | `CorporateActionCalculatorTests.cs` | Reverse splits, ISIN changes, cash and stock mergers, spin-offs, cash in lieu, the opening-position check. |
 | `DividendTaxCalculatorTests.cs` | Summing and netting withholding rows, matching by income kind, the treaty cap and the statutory cap. |
@@ -34,19 +37,31 @@ everything visual is checked in the browser.
 | `InteractiveBrokersStatementParserTests.cs`, `InteractiveBrokersCorporateActionTests.cs`, `Trading212StatementParserTests.cs` | The CSV formats of both brokers. |
 | `GenericCsvStatementParserTests.cs` | The generic trades and income templates: the template rows, one statement per broker, the strict number and date rules, the values accepted for `direction` and `income_type`, the amount check, the country/ISIN check. |
 | `CountryBreakdownTests.cs` | Which country a row goes to in PIT/ZG: the named country, else the ISIN prefix. |
-| `DbSchemaUpgraderTests.cs` | Upgrading a database of an older schema: restored totals, a correct zero left alone, sessions flagged for re-import, a second run changing nothing. |
+| `DbSchemaUpgraderTests.cs` | Upgrading a database of an older schema: restored totals, a correct zero left alone, sessions flagged for re-import (rows without kind or credit; rows produced by the superseded matching), a second run changing nothing. |
 | `UploadLimitTests.cs` | The Nginx limit equal to the API limit, Docker ports on `127.0.0.1`, a valid 2 MiB statement accepted, a file above 10 MiB rejected with `file_too_large`. |
 
 ## Helpers
 
 - **`PitlyApp`** hosts the real application in-process (`WebApplicationFactory<Program>`): real endpoints,
   parsers, calculators, SQLite and schema upgrade. Only two things are replaced: exchange rates are fixed
-  (USD = 4 PLN, EUR = 4.50 PLN) and the database is a temporary file deleted afterwards.
-  `ImportAsync(files, taxYear, residencyStartDate, priorYearLossesJson, accountLabelsJson)` posts multipart form
-  data the way the browser does; `GetAsync(url)` reads a stored session. The response wrapper gives
-  `Field("dochod")` for a PIT-38 field, `Pit38`, `Summary`, `Error`.
+  (USD = 4 PLN, EUR = 4.50 PLN, PLN = 1; `new PitlyApp(extraRates)` adds or overrides a rate, also per day with a
+  key such as `"EUR@2025-01-31"`) and the database is a temporary file deleted afterwards.
+  `ImportAsync(files, taxYear, residencyStartDate, priorYearLossesJson, accountLabelsJson, creditMethod)` posts
+  multipart form data the way the browser does; `GetAsync(url)` reads a stored session. The response wrapper
+  gives `Field("dochod")` for a PIT-38 field, `Pit38`, `Summary`, `Error`. The findings are in
+  `Pit38.GetProperty("diagnostics")` (code, message, accountId, affectedYears, unresolvedAmountPln) and the
+  readiness in `Pit38.GetProperty("readyToFile")`.
 - **`IbStatement`** builds an Interactive Brokers Activity Statement: `Instrument`, `Buy`, `Sell`, `Dividend`,
-  `Withholding`, `Interest`, `Split`, `OpeningPosition`, `PadTo(bytes)`, `Build()`.
+  `Withholding`, `Interest` (with an optional description such as `CREDIT INT FOR JAN-2025`),
+  `InterestWithholding` (a Withholding Tax row without ticker or ISIN), `Split`, `OpeningPosition`,
+  `PadTo(bytes)`, `Build()`.
+- **`IbFlexCsv`** builds an Activity Flex Query CSV with its own header per section: `Buy`, `Sell` (dates as
+  `yyyyMMdd;HHmmss`), `Dividend`, `Withholding` (an `actionId` links them; a negative amount is a refund),
+  `Interest`, `InterestWithholding`, `OtherCash` (a row of another type), `Split`, `Build()`. Every row names its
+  account, so one file can hold several.
+- **`RevolutSavingsCsv`** builds a consolidated Revolut savings statement with a BOM, CRLF, quoted dates, currency
+  signs and thousands separators: `Deposit`, `Interest`, `Withdrawal`, `Other` (an unknown row),
+  `SummaryInterest` (a summary that disagrees with the rows), `Build()`.
 - **`Trading212Export`** builds a Trading 212 history export: `Buy`, `Sell`, `Dividend` (each with an operation
   id), `Build()`.
 - **`GenericTradesCsv`** and **`GenericIncomeCsv`** build files in the generic templates: `Buy`, `Sell` and
@@ -82,7 +97,13 @@ Rules for new tests:
 - Fixed rates only; a test must not depend on the NBP API or on today's date.
 - A change in tax behaviour gets an end-to-end test, because the bug may sit in the merge, in the storage or in
   the mapping rather than in the calculator.
-- Assert the fields a user would copy into the form, not only intermediate values.
+- Assert the fields a user would copy into the form, not only intermediate values. When a case leaves money
+  unresolved, assert the finding's code and `unresolvedAmountPln` and that `readyToFile` is false, so that a
+  future change cannot quietly turn an open question into a declared amount.
+- A change in the matching of withholding is a change in tax behaviour: it needs a case in
+  `WithholdingReconciliationTests` or `CreditRulesTests` with the hand calculation, and the expected value of an
+  older test is only changed with the reason written next to it (the tests changed in the 2025 audit say which
+  behaviour they replaced and why).
 - When the CSV format matters (a new section or column), put the test next to the parser tests and build the
   CSV text in the test.
 

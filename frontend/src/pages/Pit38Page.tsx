@@ -3,6 +3,7 @@ import { Printer, FileText, ChevronDown, ChevronUp, AlertTriangle } from 'lucide
 import { formatPln, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState, Pit38Fields } from '../types';
 import EmptyState from '../components/EmptyState';
+import DiagnosticsPanel from '../components/DiagnosticsPanel';
 import { useT, type TFunction } from '../i18n';
 import { formRefs, VERIFIED_FORM_YEARS } from '../pit38Form';
 
@@ -61,30 +62,7 @@ export default function Pit38Page({ state }: { state: AppState }) {
         </div>
       )}
 
-      {pit38.needsReimport && (
-        <div className="print-warning bg-red-500/10 border border-red-500/40 rounded-xl p-5 text-sm text-red-200 flex gap-3" role="alert">
-          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-300" />
-          <div>
-            <p className="font-semibold text-red-100">{t('pit38.reimport.title')}</p>
-            <p className="mt-1">{t('pit38.reimport.body')}</p>
-          </div>
-        </div>
-      )}
-
-      {pit38.dataWarnings.length > 0 && (
-        <div className="print-warning bg-amber-500/10 border border-amber-500/40 rounded-xl p-5 text-sm text-amber-200" role="alert">
-          <p className="font-semibold text-amber-100 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-300" />
-            {t('pit38.dataWarnings.title')}
-          </p>
-          <p className="mt-1 text-amber-200/80">{t('pit38.dataWarnings.intro')}</p>
-          <ul className="mt-3 space-y-1.5 list-disc list-inside">
-            {pit38.dataWarnings.map((warning, i) => (
-              <li key={i}>{warning}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <DiagnosticsPanel pit38={pit38} />
 
       <Section title={t('pit38.sectionC.title')}>
         <div className="overflow-x-auto">
@@ -162,6 +140,7 @@ export default function Pit38Page({ state }: { state: AppState }) {
           { poz: poz(form?.zaplacony), name: t('pit38.sectionG.poz48.name'), value: pit38.podatekZaplaconyZaGranica, note: t('pit38.sectionG.poz48.note') },
           { poz: poz(form?.roznica), name: t('pit38.sectionG.poz49.name'), value: pit38.roznica, note: t('pit38.sectionG.poz49.note') },
         ]} />
+        <PolicyNote pit38={pit38} />
       </Section>
 
       <div className="bg-blue-500/10 border-2 border-blue-500 rounded-xl p-8 text-center">
@@ -196,6 +175,29 @@ export default function Pit38Page({ state }: { state: AppState }) {
       <PitZgSection pit38={pit38} />
 
       <EpityGuide pit38={pit38} year={year} hasDividends={pit38.totalDividendsPln > 0} />
+    </div>
+  );
+}
+
+// The rules behind section G, with their version and sources, and the credit method the session used. Printed
+// with the result so that a reader of the printout knows which assumption produced which figure.
+function PolicyNote({ pit38 }: { pit38: Pit38Fields }) {
+  const t = useT();
+  const policy = pit38.roundingPolicy;
+  if (!policy) return null;
+  return (
+    <div className="px-6 py-3 border-t border-slate-700/50 text-xs text-slate-500 space-y-1.5">
+      <p className="text-slate-400 font-medium">{t('diag.policy.title', { version: policy.version })}</p>
+      <p><span className="text-slate-400">{t('diag.policy.dividends')}</span> {policy.dividendRule}</p>
+      <p><span className="text-slate-400">{t('diag.policy.interest')}</span> {policy.interestRule}</p>
+      <p>
+        <span className="text-slate-400">{t('diag.policy.mixed')}</span> {policy.mixedRule}
+        {policy.mixedRuleIsAssumption && <span className="text-amber-400/80"> {t('diag.policy.assumption')}</span>}
+      </p>
+      <p><span className="text-slate-400">{t('diag.credit.label')}</span> {t(`diag.credit.${pit38.creditMethod}`)}</p>
+      <p className="break-words">
+        <span className="text-slate-400">{t('diag.policy.sources')}</span> {policy.sources.join(' · ')}
+      </p>
     </div>
   );
 }

@@ -154,7 +154,7 @@ public class EndToEndImportTests
     }
 
     [Fact]
-    public async Task Import_CreditNeverExceedsTheTaxActuallyWithheldAfterCorrections()
+    public async Task Import_ExcessRefundIsReportedAsUnresolvedInsteadOfReducingAnotherPayment()
     {
         var year2025 = new IbStatement("U1111111", 2025)
             .Dividend("AAPL", Aapl, "2025-05-15", 100m).Withholding("AAPL", Aapl, "2025-05-15", 15m)
@@ -168,12 +168,29 @@ public class EndToEndImportTests
         var result = await app.ImportAsync([("2025.csv", year2025.Build()), ("2026.csv", year2026.Build())], taxYear: 2025);
 
         Assert.Equal(HttpStatusCode.OK, result.Status);
-        // Actually withheld: (15 - 20 + 15) USD = 10 USD = 40 PLN. Without the netting the August 60 PLN would be credited.
-        var creditable = result.Summary.GetProperty("totalCreditableWithholdingPln").GetDecimal();
-        Assert.Equal(40m, creditable);
-        Assert.Equal(40m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());
-        Assert.Equal(40m, result.Field("podatekZaplaconyZaGranica"));
+        // May: 15 - 20 < 0, so nothing is credited on it. August keeps its 15 USD = 60 PLN: the 5 USD excess is not
+        // taken off it (an earlier version did that, which moved money between payments without evidence of a link).
+        Assert.Equal(60m, result.Summary.GetProperty("totalCreditableWithholdingPln").GetDecimal());
+        Assert.Equal(60m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());
+        Assert.Equal(60m, result.Field("podatekZaplaconyZaGranica"));
+        var diagnostics = result.Pit38.GetProperty("diagnostics").EnumerateArray().ToList();
+        var excess = Assert.Single(diagnostics, d => d.GetProperty("code").GetString() == "EXCESS_REFUND");
+        Assert.Equal(20m, excess.GetProperty("unresolvedAmountPln").GetDecimal());   // 5 USD x 4
+        // The refund was booked in 2026 for a 2025 payment: both years are named, and the return is not called final.
+        var crossYear = Assert.Single(diagnostics, d => d.GetProperty("code").GetString() == "CROSS_YEAR_ADJUSTMENT");
+        Assert.Equal([2025, 2026], crossYear.GetProperty("affectedYears").EnumerateArray().Select(y => y.GetInt32()));
+        Assert.False(result.Pit38.GetProperty("readyToFile").GetBoolean());
+        Assert.Equal(20m + 80m, result.Pit38.GetProperty("unresolvedAmountPln").GetDecimal()); // excess + the whole cross-year refund
         Assert.Contains(result.Strings(result.Pit38.GetProperty("dataWarnings")), w => w.Contains("refund for AAPL"));
+
+        // The stored events say the same after a reload.
+        var sessionId = result.Body.GetProperty("sessionId").GetString();
+        var events = await app.GetAsync($"/api/session/{sessionId}/withholding-events");
+        Assert.Equal(HttpStatusCode.OK, events.Status);
+        var rows = events.Body.EnumerateArray().ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, r => Assert.Equal("Matched", r.GetProperty("status").GetString()));
+        Assert.Contains(rows, r => r.GetProperty("amount").GetDecimal() == -20m && r.GetProperty("sourceFile").GetString() == "2026.csv" && r.GetProperty("sourceStatementYear").GetInt32() == 2026);
     }
 
     [Fact]

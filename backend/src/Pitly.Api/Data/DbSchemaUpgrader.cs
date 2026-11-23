@@ -5,16 +5,22 @@ namespace Pitly.Api.Data;
 
 /// <summary>
 /// Brings a database created by an earlier version up to the current schema and repairs the aggregates of the
-/// sessions stored in it. Columns are only ever added. What can be restored for an old session depends on what its
-/// rows carried when they were saved, so that is established before any column is added.
+/// sessions stored in it. Columns and tables are only ever added. What can be restored for an old session depends
+/// on what its rows carried when they were saved, so that is established before any column is added. A stored
+/// session is never recomputed with newer rules behind the user's back: when the rules changed in a way the stored
+/// rows cannot reproduce, the session is flagged for re-import and its amounts are shown as such.
 /// </summary>
 public static class DbSchemaUpgrader
 {
     /// <summary>
-    /// Version of the data stored with a session. 0: saved before versions were tracked (aggregates may be missing).
+    /// Version of the data stored with a session.
+    /// 0: saved before versions were tracked (aggregates may be missing).
     /// 2: interest aggregates, result warnings and row-level credit are all stored by the code that saved it.
+    /// 3: totals kept at full precision, withholding matched over the whole history with structured diagnostics,
+    ///    withholding events and source files stored. A session of version 2 or lower that has art. 30a income was
+    ///    computed with rounded totals and with the older matching rules, so it needs a re-import.
     /// </summary>
-    public const int CurrentDataVersion = 2;
+    public const int CurrentDataVersion = 3;
 
     private static readonly (string Table, string Column, string Definition)[] Columns =
     [
@@ -29,6 +35,11 @@ public static class DbSchemaUpgrader
         ("Sessions", "TotalInterestCreditableWithholdingPln", "TEXT NOT NULL DEFAULT '0.0'"),
         ("Sessions", "DataVersion", "INTEGER NOT NULL DEFAULT 0"),
         ("Sessions", "NeedsReimport", "INTEGER NOT NULL DEFAULT 0"),
+        ("Sessions", "DiagnosticsJson", "TEXT NULL"),
+        ("Sessions", "SourceFilesJson", "TEXT NULL"),
+        ("Sessions", "RulesVersion", "TEXT NULL"),
+        ("Sessions", "FormVersion", "INTEGER NULL"),
+        ("Sessions", "CreditMethod", "TEXT NOT NULL DEFAULT 'TreatyCap'"),
         ("TradeResults", "Note", "TEXT NULL"),
         ("TradeResults", "Isin", "TEXT NULL"),
         ("TradeResults", "CountryCode", "TEXT NULL"),
@@ -36,8 +47,26 @@ public static class DbSchemaUpgrader
         ("Dividends", "Kind", "TEXT NOT NULL DEFAULT 'Dividend'"),
         ("Dividends", "CreditableWithholdingPln", "TEXT NOT NULL DEFAULT '0.0'"),
         ("Dividends", "MaxCreditableRate", "TEXT NULL"),
-        ("Dividends", "CountryCode", "TEXT NULL")
+        ("Dividends", "CountryCode", "TEXT NULL"),
+        ("Dividends", "AccountId", "TEXT NULL"),
+        ("Dividends", "TransactionId", "TEXT NULL"),
+        ("Dividends", "ActionId", "TEXT NULL"),
+        ("Dividends", "SourceFile", "TEXT NULL"),
+        ("Dividends", "WithholdingSource", "TEXT NULL")
     ];
+
+    private const string WithholdingEventsTable =
+        """
+        CREATE TABLE IF NOT EXISTS WithholdingEvents (
+            Id INTEGER NOT NULL CONSTRAINT PK_WithholdingEvents PRIMARY KEY AUTOINCREMENT,
+            SessionId TEXT NOT NULL,
+            AccountId TEXT NULL, Symbol TEXT NOT NULL, Isin TEXT NULL, Currency TEXT NOT NULL, Kind TEXT NOT NULL,
+            Amount TEXT NOT NULL, Date TEXT NOT NULL, BookingDate TEXT NULL, SourceStatementYear INTEGER NULL,
+            TransactionId TEXT NULL, ActionId TEXT NULL, Reference TEXT NULL, SourceFile TEXT NULL,
+            RawType TEXT NULL, RawDescription TEXT NULL, Status TEXT NOT NULL, MatchedPayment TEXT NULL,
+            AmountPln TEXT NOT NULL, UnresolvedAmountPln TEXT NOT NULL, DiagnosticCode TEXT NULL,
+            CONSTRAINT FK_WithholdingEvents_Sessions_SessionId FOREIGN KEY (SessionId) REFERENCES Sessions (Id) ON DELETE CASCADE);
+        """;
 
     public static void EnsureLatestSchema(AppDbContext db)
     {
@@ -58,6 +87,8 @@ public static class DbSchemaUpgrader
                 Execute(db, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition + ";");
         }
 
+        Execute(db, WithholdingEventsTable);
+
         RepairStoredSessions(db, rowsCarryKindAndCredit);
     }
 
@@ -74,18 +105,28 @@ public static class DbSchemaUpgrader
 
         foreach (var session in sessions)
         {
-            if (session.Dividends.Count == 0 && session.TotalDividendsPln == 0m)
+            if (session.Dividends.Count == 0 && session.TotalDividendsPln == 0m && session.TotalWithholdingPln == 0m)
             {
-                // No art. 30a income at all: zero interest and zero credit are the correct aggregates.
+                // No art. 30a income at all: zero interest and zero credit are the correct aggregates, and nothing
+                // about the capital-gains rules changed between the versions.
             }
             else if (CanRestoreFromRows(session, rowsCarryKindAndCredit))
             {
-                // The rows are the truth; the session totals are their sums. A total of zero is a valid result
-                // (no interest, or foreign tax that is not creditable) and is stored as such, not "repaired".
+                // The rows are the truth; the session totals are their exact sums (earlier versions stored them
+                // rounded to the grosz). A total of zero is a valid result (no interest, or foreign tax that is not
+                // creditable) and is stored as such, not "repaired".
                 var interest = session.Dividends.Where(d => d.Kind == "Interest").ToList();
-                session.TotalInterestPln = Math.Round(interest.Sum(d => d.AmountPln), 2);
-                session.TotalInterestCreditableWithholdingPln = Math.Round(interest.Sum(d => d.CreditableWithholdingPln), 2);
-                session.TotalCreditableWithholdingPln = Math.Round(session.Dividends.Sum(d => d.CreditableWithholdingPln), 2);
+                session.TotalDividendsPln = session.Dividends.Sum(d => d.AmountPln);
+                session.TotalWithholdingPln = session.Dividends.Sum(d => d.WithholdingTaxPln);
+                session.TotalInterestPln = interest.Sum(d => d.AmountPln);
+                session.TotalInterestCreditableWithholdingPln = interest.Sum(d => d.CreditableWithholdingPln);
+                session.TotalCreditableWithholdingPln = session.Dividends.Sum(d => d.CreditableWithholdingPln);
+
+                // The rows of an older session were produced by the older matching, which could spread an excess
+                // refund over other payments or split an ambiguous tax row between payments. Such a session says so
+                // in its stored warnings; its rows cannot be trusted and it is flagged instead of being reinterpreted.
+                if (UsedSupersededMatching(session))
+                    session.NeedsReimport = true;
             }
             else
             {
@@ -99,6 +140,19 @@ public static class DbSchemaUpgrader
 
         if (sessions.Count > 0)
             db.SaveChanges();
+    }
+
+    private static readonly string[] SupersededMatchingMarkers =
+    [
+        "was offset against",
+        "could not be offset in the selected period",
+        "could not be tied to one payment"
+    ];
+
+    private static bool UsedSupersededMatching(SessionEntity session)
+    {
+        var text = (session.WarningsJson ?? string.Empty) + (session.ResultWarningsJson ?? string.Empty);
+        return SupersededMatchingMarkers.Any(marker => text.Contains(marker, StringComparison.Ordinal));
     }
 
     private static bool CanRestoreFromRows(SessionEntity session, bool rowsCarryKindAndCredit)

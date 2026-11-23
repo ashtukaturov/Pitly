@@ -30,14 +30,18 @@ public class ImportService : IImportService
         IReadOnlyList<PriorYearLoss>? priorYearLosses = null,
         int? taxYear = null,
         IReadOnlyList<string>? fileNames = null,
-        IReadOnlyDictionary<string, string>? accountLabels = null)
+        IReadOnlyDictionary<string, string>? accountLabels = null,
+        CreditMethod creditMethod = CreditMethod.TreatyCap)
     {
         if (fileStreams.Count == 0)
             throw new FormatException("No files uploaded.");
 
         var files = new List<StatementMerger.NamedStatement>();
         var importWarnings = new List<string>();
+        var importDiagnostics = new List<TaxDiagnostic>();
         var seenContent = new Dictionary<string, string>(StringComparer.Ordinal);
+        var sourceFiles = new List<SourceFile>();
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
 
         for (var i = 0; i < fileStreams.Count; i++)
         {
@@ -49,10 +53,13 @@ public class ImportService : IImportService
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
             if (seenContent.TryGetValue(hash, out var firstName))
             {
-                importWarnings.Add("'" + name + "' is identical to '" + firstName + "' and was skipped.");
+                var message = "'" + name + "' is identical to '" + firstName + "' and was skipped.";
+                importWarnings.Add(message);
+                importDiagnostics.Add(new TaxDiagnostic(DiagnosticCodes.OverlapSkipped, DiagnosticSeverity.Info, message, name));
                 continue;
             }
             seenContent[hash] = name;
+            hashes[name] = hash;
 
             _logger.LogInformation("Parsing statement {Index}/{Count} ({Length} chars)", i + 1, fileStreams.Count, content.Length);
             // A broker export is one statement. A generic CSV file may list several brokers; each is its own account
@@ -64,6 +71,7 @@ public class ImportService : IImportService
             {
                 var statementName = parsedStatements.Count > 1 ? name + " (" + parsed.Broker + ")" : name;
                 files.Add(new StatementMerger.NamedStatement(statementName, parsed, label));
+                sourceFiles.Add(new SourceFile(statementName, hash, parsed.Broker, parsed.AccountId, parsed.StatementYear, parsed.ParserVersion));
                 _logger.LogInformation(
                     "Parsed statement {Index}/{Count} ({Name}): {Trades} trades, {Dividends} dividends, {Taxes} withholding taxes, {Actions} corporate actions",
                     i + 1,
@@ -85,7 +93,7 @@ public class ImportService : IImportService
         {
             var taxPeriod = DetermineTaxPeriod(statements, availableYears, residencyStartDate, taxYear);
             attemptedYear = taxPeriod.Year;
-            var merged = StatementMerger.Merge(files, taxPeriod.Year, importWarnings);
+            var merged = StatementMerger.Merge(files, taxPeriod.Year, importWarnings, importDiagnostics);
 
             if (merged.Trades.Count == 0 && merged.Dividends.Count == 0 && merged.WithholdingTaxes.Count == 0 &&
                 (merged.CorporateActions?.Count ?? 0) == 0)
@@ -97,9 +105,10 @@ public class ImportService : IImportService
                     "Upload the year(s) in which you sold shares or received dividends; earlier years can be added alongside for FIFO history.");
             }
 
-            var calculated = await _calculator.CalculateAsync(merged, taxPeriod) with
+            var calculated = await _calculator.CalculateAsync(merged, taxPeriod, creditMethod) with
             {
-                PriorYearLosses = priorYearLosses ?? []
+                PriorYearLosses = priorYearLosses ?? [],
+                SourceFiles = sourceFiles
             };
 
             // PIT-38 is the single source of the tax amounts: the summary carries its figures (after the loss
@@ -123,7 +132,7 @@ public class ImportService : IImportService
             await _db.SaveChangesAsync();
 
             _logger.LogInformation("Session {SessionId} saved", session.Id);
-            return new ImportResult(session.Id, summary, availableYears, files.Select(DescribeFile).ToList());
+            return new ImportResult(session.Id, summary, availableYears, files.Select(f => DescribeFile(f, hashes)).ToList());
         }
         catch (Exception ex) when (ex is FormatException or InvalidOperationException)
         {
@@ -131,15 +140,20 @@ public class ImportService : IImportService
         }
     }
 
-    private static ImportedFile DescribeFile(StatementMerger.NamedStatement file)
+    private static ImportedFile DescribeFile(StatementMerger.NamedStatement file, IReadOnlyDictionary<string, string> hashes)
     {
         var resolution = StatementMerger.ResolveAccount(file);
+        var fileName = file.Name;
+        var bracket = fileName.LastIndexOf(" (", StringComparison.Ordinal);
+        var uploadName = hashes.ContainsKey(fileName) || bracket < 0 ? fileName : fileName[..bracket];
         return new ImportedFile(
             file.Name,
             file.Statement.Broker,
             resolution.FromUser ? file.AccountLabel!.Trim() : resolution.Account,
             AccountKnown: resolution.FromStatement,
-            AccountConfirmed: resolution.FromStatement || resolution.FromUser);
+            AccountConfirmed: resolution.FromStatement || resolution.FromUser,
+            Format: file.Statement.ParserVersion,
+            Sha256: hashes.GetValueOrDefault(uploadName));
     }
 
     private static TaxPeriod DetermineTaxPeriod(

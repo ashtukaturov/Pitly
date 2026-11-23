@@ -1,4 +1,4 @@
-import type { ImportResponse, TradesPage, DividendResult, TaxSummary, Pit38Fields, PriorYearLossInput } from './types';
+import type { ImportResponse, TradesPage, DividendResult, TaxSummary, Pit38Fields, PriorYearLossInput, CreditMethod, WithholdingEvent } from './types';
 import type { TFunction } from './i18n';
 
 const BASE = '/api';
@@ -14,6 +14,8 @@ export interface ImportOptions {
   taxYear?: number;
   /** For files without an account number: file name -> label of the account the user says it belongs to. */
   accountLabels?: Record<string, string>;
+  /** How the foreign tax credit is limited; omitted means the treaty cap. */
+  creditMethod?: CreditMethod;
 }
 
 /** A failed import, with what the server said about it so the UI can localise the message and offer a way out. */
@@ -65,6 +67,7 @@ function buildImportForm(files: File[], options: ImportOptions): FormData {
   if (options.priorYearLosses && options.priorYearLosses.length > 0) form.append('priorYearLosses', JSON.stringify(options.priorYearLosses));
   if (options.taxYear) form.append('taxYear', String(options.taxYear));
   if (options.accountLabels && Object.keys(options.accountLabels).length > 0) form.append('accountLabels', JSON.stringify(options.accountLabels));
+  if (options.creditMethod && options.creditMethod !== 'TreatyCap') form.append('creditMethod', options.creditMethod);
   return form;
 }
 
@@ -120,6 +123,13 @@ export async function getSummary(sessionId: string): Promise<TaxSummary> {
 export async function getPit38(sessionId: string): Promise<Pit38Fields> {
   const res = await fetch(`${BASE}/session/${sessionId}/pit38`);
   if (!res.ok) throw new Error('Failed to load PIT-38 fields');
+  return res.json();
+}
+
+/** Every withholding event of the session's year and what the calculation did with it. */
+export async function getWithholdingEvents(sessionId: string): Promise<WithholdingEvent[]> {
+  const res = await fetch(`${BASE}/session/${sessionId}/withholding-events`);
+  if (!res.ok) throw new Error('Failed to load withholding events');
   return res.json();
 }
 

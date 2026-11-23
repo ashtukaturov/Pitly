@@ -21,6 +21,24 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
 {
     public const decimal UsdRate = 4m;
 
+    private readonly Dictionary<string, decimal> _rates = new()
+    {
+        ["USD"] = UsdRate,
+        ["EUR"] = 4.5m,
+        ["PLN"] = 1m
+    };
+
+    public PitlyApp()
+    {
+    }
+
+    /// <summary>Extra fixed rates for a test; a key such as "EUR@2025-01-31" sets the rate of one day.</summary>
+    public PitlyApp(IReadOnlyDictionary<string, decimal> extraRates)
+    {
+        foreach (var (key, value) in extraRates)
+            _rates[key] = value;
+    }
+
     public string DatabasePath { get; } =
         Path.Combine(Path.GetTempPath(), "pitly-tests-" + Guid.NewGuid().ToString("N") + ".db");
 
@@ -30,12 +48,7 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<INbpExchangeRateService>();
-            services.AddScoped<INbpExchangeRateService>(_ => new TestRateService(new Dictionary<string, decimal>
-            {
-                ["USD"] = UsdRate,
-                ["EUR"] = 4.5m,
-                ["PLN"] = 1m
-            }));
+            services.AddScoped<INbpExchangeRateService>(_ => new TestRateService(_rates));
         });
     }
 
@@ -71,7 +84,8 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         int? taxYear = null,
         string? residencyStartDate = null,
         string? priorYearLossesJson = null,
-        string? accountLabelsJson = null)
+        string? accountLabelsJson = null,
+        string? creditMethod = null)
     {
         using var form = new MultipartFormDataContent();
         foreach (var (name, csv) in files)
@@ -85,6 +99,7 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         if (residencyStartDate is not null) form.Add(new StringContent(residencyStartDate), "residencyStartDate");
         if (priorYearLossesJson is not null) form.Add(new StringContent(priorYearLossesJson), "priorYearLosses");
         if (accountLabelsJson is not null) form.Add(new StringContent(accountLabelsJson), "accountLabels");
+        if (creditMethod is not null) form.Add(new StringContent(creditMethod), "creditMethod");
 
         using var client = CreateClient();
         using var response = await client.PostAsync("/api/import", form);

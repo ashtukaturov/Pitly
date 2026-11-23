@@ -22,6 +22,8 @@ const emptyState: AppState = {
   priorYearLosses: [],
   importedFiles: [],
   accountLabels: {},
+  withholdingEvents: [],
+  creditMethod: 'TreatyCap',
 };
 
 function AppLayout({ year }: { year: number | null }) {
@@ -59,6 +61,7 @@ export default function App() {
     const year = options.year ?? state.summary?.year;
     const residencyStartDate = 'residencyStartDate' in options ? options.residencyStartDate : state.residencyStartDate;
     const accountLabels = options.accountLabels ?? state.accountLabels;
+    const creditMethod = options.creditMethod ?? state.creditMethod;
     setSwitchingYear(true);
     setYearError(null);
     try {
@@ -67,6 +70,7 @@ export default function App() {
         priorYearLosses: state.priorYearLosses,
         taxYear: year,
         accountLabels,
+        creditMethod,
       });
       setState(prev => ({
         ...prev,
@@ -79,6 +83,8 @@ export default function App() {
         importedFiles: result.files,
         accountLabels,
         residencyStartDate,
+        withholdingEvents: result.withholdingEvents ?? [],
+        creditMethod,
       }));
     } catch (err: unknown) {
       setYearError(describeImportError(err, t) || t('app.switchYearFailed'));

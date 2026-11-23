@@ -31,6 +31,13 @@ public partial class InteractiveBrokersStatementParser
         decimal? Denominator,
         decimal? CashPerShare);
 
+    /// <summary>Rows in the Activity Statement layout from another source (the Flex parser rebuilds them).</summary>
+    internal List<CorporateAction> ParseCorporateActionRows(
+        List<List<string>> rows,
+        IReadOnlyDictionary<string, string> symbolToIsin,
+        List<string> warnings)
+        => ParseCorporateActions(rows, symbolToIsin, warnings);
+
     private List<CorporateAction> ParseCorporateActions(
         List<List<string>> rows,
         IReadOnlyDictionary<string, string> symbolToIsin,

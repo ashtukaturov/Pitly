@@ -68,13 +68,30 @@ public record Pit38Fields(
     IReadOnlyList<string> DataWarnings,
 
     // The session was saved by an older version without the data needed to rebuild these amounts exactly
-    bool NeedsReimport = false)
+    bool NeedsReimport = false,
+
+    // Every finding with its code, scope and the amount that depends on it; DataWarnings are the messages of the
+    // findings that are at least warnings
+    IReadOnlyList<TaxDiagnostic>? Diagnostics = null,
+
+    // False while any finding says the declared amounts cannot be called final (an unresolved refund, a
+    // withholding row that matches nothing, a cross-year adjustment whose year is not decided, an old session)
+    bool ReadyToFile = true,
+
+    // Money that is not in the amounts above because of unresolved findings
+    decimal UnresolvedAmountPln = 0m,
+
+    // The rounding rules applied to section G, with their version and sources
+    RoundingPolicy? RoundingPolicy = null,
+
+    // How the foreign tax credit was limited
+    CreditMethod CreditMethod = CreditMethod.TreatyCap)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
-        // Section C — Capital gains
-        var przychody = summary.TotalProceedsPln;
-        var koszty = summary.TotalCostPln;
+        // Section C — Capital gains. The summary keeps full precision; the form fields are in zl, gr.
+        var przychody = RoundToGrosz(summary.TotalProceedsPln);
+        var koszty = RoundToGrosz(summary.TotalCostPln);
         var difference = przychody - koszty;
         var dochod = Math.Round(Math.Max(difference, 0), 2);
         var strata = Math.Round(Math.Max(-difference, 0), 2);
@@ -128,6 +145,23 @@ public record Pit38Fields(
         var daninaNadwyzka = Math.Max(podstawa - TaxConstants.SolidarityLevyThresholdPln, 0);
         var danina = RoundToFullPln(daninaNadwyzka * TaxConstants.SolidarityLevyRate);
 
+        var diagnostics = (summary.Diagnostics ?? []).ToList();
+        if (diagnostics.Count == 0 && summary.ResultWarnings is { Count: > 0 } legacy)
+        {
+            // A session stored before diagnostics existed: its result warnings are the findings.
+            diagnostics.AddRange(legacy.Select(w => new TaxDiagnostic(
+                w.StartsWith(CapitalGainsTaxCalculator.PositionCheckPrefix, StringComparison.Ordinal) ? DiagnosticCodes.PositionCheck
+                    : w.StartsWith(Parsing.StatementMerger.AccountCheckPrefix, StringComparison.Ordinal) ? DiagnosticCodes.AccountAssumed
+                    : DiagnosticCodes.UnmatchedWithholding,
+                DiagnosticSeverity.Warning, w, AffectsAmounts: true)));
+        }
+        var dataWarnings = diagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning).Select(d => d.Message).Distinct().ToList();
+        foreach (var w in summary.ResultWarnings ?? [])
+        {
+            if (!dataWarnings.Contains(w))
+                dataWarnings.Add(w);
+        }
+
         return new Pit38Fields(
             Year: summary.Year,
             InnePrzychody: przychody,
@@ -151,7 +185,12 @@ public record Pit38Fields(
             Warnings: lossResult.Warnings,
             PitZg: summary.Countries ?? [],
             Form: Pit38FormLayout.ForYear(summary.Year),
-            DataWarnings: summary.ResultWarnings ?? []);
+            DataWarnings: dataWarnings,
+            Diagnostics: diagnostics,
+            ReadyToFile: diagnostics.All(d => !d.BlocksFiling),
+            UnresolvedAmountPln: diagnostics.Where(d => d.BlocksFiling).Sum(d => d.UnresolvedAmountPln ?? 0m),
+            RoundingPolicy: RoundingPolicy.Current,
+            CreditMethod: summary.CreditMethod);
     }
 
     /// <summary>

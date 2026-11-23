@@ -30,7 +30,17 @@ public class SessionEntity
     public int DataVersion { get; set; }
     // Saved by an older version without the data needed to rebuild the aggregates exactly
     public bool NeedsReimport { get; set; }
+    // Structured findings (JSON array of TaxDiagnostic); null for sessions saved before they existed
+    public string? DiagnosticsJson { get; set; }
+    // The uploaded files: name, SHA-256, broker, account, statement year, parser (JSON array of SourceFile)
+    public string? SourceFilesJson { get; set; }
+    // Versions of the rules and of the form layout the amounts were computed with
+    public string? RulesVersion { get; set; }
+    public int? FormVersion { get; set; }
+    // How the foreign tax credit was limited (CreditMethod name)
+    public string CreditMethod { get; set; } = "TreatyCap";
 
     public List<TradeResultEntity> TradeResults { get; set; } = [];
     public List<DividendEntity> Dividends { get; set; } = [];
+    public List<WithholdingEventEntity> WithholdingEvents { get; set; } = [];
 }

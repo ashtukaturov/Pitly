@@ -1,12 +1,18 @@
 using Pitly.Core.Models;
+using Pitly.Core.Parsing;
 
 namespace Pitly.Core.Tax;
 
 public interface ITaxCalculator
 {
-    Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod);
+    Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, CreditMethod creditMethod = CreditMethod.TreatyCap);
 }
 
+/// <summary>
+/// Runs the two calculators over the merged history and assembles the summary. The order matters: every
+/// withholding event is matched over the whole history first, the tax year is selected afterwards, and nothing is
+/// rounded here, so that <see cref="Pit38Fields.FromSummary"/> works from exact amounts.
+/// </summary>
 public class TaxCalculator : ITaxCalculator
 {
     private readonly ICapitalGainsTaxCalculator _capitalGainsCalculator;
@@ -20,24 +26,50 @@ public class TaxCalculator : ITaxCalculator
         _dividendTaxCalculator = dividendTaxCalculator;
     }
 
-    public async Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod)
+    public async Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, CreditMethod creditMethod = CreditMethod.TreatyCap)
     {
         // The two calculators run concurrently, so each gets its own list. What they report puts the result itself
         // in doubt (history that does not add up, withholding that could not be attributed) and is therefore kept
         // apart from the informational statement warnings: it is repeated on PIT-38 and in the printed report.
         var capitalGainWarnings = new List<string>();
-        var dividendWarnings = new List<string>();
+        var dividendDiagnostics = new List<TaxDiagnostic>();
         var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, capitalGainWarnings);
         var dividendsTask = _dividendTaxCalculator.CalculateAsync(
-            statement.Dividends.Where(d => taxPeriod.IncludesDate(d.Date)).ToList(),
-            statement.WithholdingTaxes.Where(t => taxPeriod.IncludesDate(t.Date)).ToList(),
-            dividendWarnings);
+            statement.Dividends, statement.WithholdingTaxes, taxPeriod, creditMethod, dividendDiagnostics);
         await Task.WhenAll(tradeResultsTask, dividendsTask);
         var tradeResults = tradeResultsTask.Result;
-        var dividends = dividendsTask.Result;
+        var dividendResult = dividendsTask.Result;
+        var dividends = dividendResult.Dividends;
 
-        var resultWarnings = capitalGainWarnings.Concat(dividendWarnings)
-            .Concat((statement.Warnings ?? []).Where(w => w.StartsWith(Parsing.StatementMerger.AccountCheckPrefix, StringComparison.Ordinal)))
+        var diagnostics = new List<TaxDiagnostic>();
+        foreach (var warning in capitalGainWarnings)
+        {
+            diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.PositionCheck, DiagnosticSeverity.Warning, warning,
+                AffectedYears: [taxPeriod.Year], AffectsAmounts: true));
+        }
+        diagnostics.AddRange(dividendDiagnostics);
+        diagnostics.AddRange(statement.Diagnostics ?? []);
+        foreach (var warning in (statement.Warnings ?? []).Where(w => w.StartsWith(StatementMerger.AccountCheckPrefix, StringComparison.Ordinal)))
+        {
+            if (diagnostics.All(d => d.Message != warning))
+                diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.AccountAssumed, DiagnosticSeverity.Warning, warning, AffectsAmounts: true));
+        }
+
+        var interest = dividends.Where(d => d.Kind == IncomeKind.Interest).ToList();
+        var totalDividendsPln = dividends.Sum(d => d.AmountPln);
+        var totalInterestPln = interest.Sum(d => d.AmountPln);
+        if (totalInterestPln > 0m && totalDividendsPln - totalInterestPln > 0m)
+        {
+            diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.MixedStreamRounding, DiagnosticSeverity.Info,
+                "This year has both dividends and interest. The form has one field for both; each stream is rounded by its own rule " +
+                "(full PLN for dividends, grosz upward for interest) and the two results are added, because the Ministry gives no rule for the mix. " +
+                "Rounding policy " + RoundingPolicy.Current.Version + ".",
+                AffectedYears: [taxPeriod.Year]));
+        }
+
+        var resultWarnings = diagnostics
+            .Where(d => d.Severity >= DiagnosticSeverity.Warning)
+            .Select(d => d.Message)
             .Distinct()
             .ToList();
         var warnings = (statement.Warnings ?? []).Concat(resultWarnings).Distinct().ToList();
@@ -46,27 +78,26 @@ public class TaxCalculator : ITaxCalculator
         var totalProceedsPln = sellResults.Sum(t => t.ProceedsPln);
         var totalCostPln = sellResults.Sum(t => t.CostPln);
         var capitalGain = totalProceedsPln - totalCostPln;
-        var capitalGainTax = capitalGain > 0 ? Math.Round(capitalGain * TaxConstants.TaxRate, 2) : 0;
+        var capitalGainTax = capitalGain > 0 ? capitalGain * TaxConstants.TaxRate : 0;
 
-        var totalDividendsPln = dividends.Sum(d => d.AmountPln);
         var totalWithholdingPln = dividends.Sum(d => d.WithholdingTaxPln);
         var totalCreditableWithholdingPln = dividends.Sum(d => d.CreditableWithholdingPln);
-        var polishDividendTax = Math.Round(totalDividendsPln * TaxConstants.TaxRate, 2);
+        var polishDividendTax = totalDividendsPln * TaxConstants.TaxRate;
         var withholdingCredit = Math.Min(totalCreditableWithholdingPln, polishDividendTax);
         var dividendTaxOwed = Math.Max(polishDividendTax - withholdingCredit, 0);
 
         var countries = CountryBreakdown.Build(tradeResults, dividends);
-        var interest = dividends.Where(d => d.Kind == IncomeKind.Interest).ToList();
 
+        // Full precision everywhere: the form's rounding is applied once, in Pit38Fields.FromSummary.
         return new TaxSummary(
-            TotalProceedsPln: Math.Round(totalProceedsPln, 2),
-            TotalCostPln: Math.Round(totalCostPln, 2),
-            CapitalGainPln: Math.Round(capitalGain, 2),
+            TotalProceedsPln: totalProceedsPln,
+            TotalCostPln: totalCostPln,
+            CapitalGainPln: capitalGain,
             CapitalGainTaxPln: capitalGainTax,
-            TotalDividendsPln: Math.Round(totalDividendsPln, 2),
-            TotalWithholdingPln: Math.Round(totalWithholdingPln, 2),
-            TotalCreditableWithholdingPln: Math.Round(totalCreditableWithholdingPln, 2),
-            DividendTaxOwedPln: Math.Round(dividendTaxOwed, 2),
+            TotalDividendsPln: totalDividendsPln,
+            TotalWithholdingPln: totalWithholdingPln,
+            TotalCreditableWithholdingPln: totalCreditableWithholdingPln,
+            DividendTaxOwedPln: dividendTaxOwed,
             Year: taxPeriod.Year,
             TaxableFrom: taxPeriod.TaxableFrom,
             TaxableTo: taxPeriod.TaxableTo,
@@ -74,8 +105,11 @@ public class TaxCalculator : ITaxCalculator
             Dividends: dividends,
             Warnings: warnings,
             Countries: countries,
-            TotalInterestPln: Math.Round(interest.Sum(d => d.AmountPln), 2),
-            TotalInterestCreditableWithholdingPln: Math.Round(interest.Sum(d => d.CreditableWithholdingPln), 2),
-            ResultWarnings: resultWarnings);
+            TotalInterestPln: totalInterestPln,
+            TotalInterestCreditableWithholdingPln: interest.Sum(d => d.CreditableWithholdingPln),
+            ResultWarnings: resultWarnings,
+            Diagnostics: diagnostics,
+            WithholdingEvents: dividendResult.Events,
+            CreditMethod: creditMethod);
     }
 }

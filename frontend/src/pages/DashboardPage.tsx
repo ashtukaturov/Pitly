@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { formatPln, numColor, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
 import type { AppState, ImportedFile, RecalculateOptions } from '../types';
 import EmptyState from '../components/EmptyState';
+import DiagnosticsPanel from '../components/DiagnosticsPanel';
 import { useT } from '../i18n';
 
 export default function DashboardPage({
@@ -60,7 +61,10 @@ export default function DashboardPage({
   const PIE_COLORS = ['#3b82f6', '#f59e0b'];
 
   const paymentCount = state.dividends.length;
-  const warningCount = summary.warnings?.length ?? 0;
+  // Findings already shown in the diagnostics panel are not repeated in the general list of statement warnings.
+  const shownAsDiagnostic = new Set((pit38.diagnostics ?? []).map(d => d.message));
+  const otherWarnings = (summary.warnings ?? []).filter(w => !shownAsDiagnostic.has(w));
+  const warningCount = otherWarnings.length;
   const filesWithoutAccount = state.importedFiles.filter(file => !file.accountKnown);
 
   const cards = [
@@ -165,15 +169,7 @@ export default function DashboardPage({
         )}
       </div>
 
-      {pit38.needsReimport && (
-        <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-5 text-sm text-red-200 flex gap-3" role="alert">
-          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-300" />
-          <div>
-            <p className="font-semibold text-red-100">{t('pit38.reimport.title')}</p>
-            <p className="mt-1">{t('pit38.reimport.body')}</p>
-          </div>
-        </div>
-      )}
+      <DiagnosticsPanel pit38={pit38} compact />
 
       {warningCount > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 text-sm text-amber-200">
@@ -184,7 +180,7 @@ export default function DashboardPage({
               : t('dashboard.reviewMany', { count: warningCount })}
           </p>
           <ul className="space-y-1.5 list-disc list-inside">
-            {summary.warnings.map((warning, i) => (
+            {otherWarnings.map((warning, i) => (
               <li key={i}>{warning}</li>
             ))}
           </ul>
