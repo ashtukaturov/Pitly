@@ -166,9 +166,31 @@ A sample IB statement is provided at [`samples/sample-activity-statement.csv`](s
 - Only **USD** and **EUR** currencies
 - Capital gains are currently calculated using the **trade date**, not the **settlement date**. This is a commonly used and generally safe practical approach for most same-year retail cases, but some stricter interpretations use settlement date instead, especially around year-end and exchange-holiday edge cases. See: [Investor.gov — New T+1 settlement cycle](https://www.investor.gov/newT1settlement-cycle)
 - If you sell a position opened in earlier years, upload those earlier yearly statements too so FIFO cost basis can be reconstructed correctly
-- Loss carryforward from previous years must be applied manually
+- Losses from previous years are deducted only when you enter them on the import page; Pitly does not read them from earlier returns
 - Does not submit PIT-38 electronically — you enter the values yourself
 - Always verify results and consult a tax advisor if unsure
+
+## Development
+
+```bash
+dotnet test backend/tests/Pitly.Tests/Pitly.Tests.csproj --nologo
+```
+
+```bash
+npm run lint --prefix frontend
+```
+
+```bash
+npm run build --prefix frontend
+```
+
+The tests need no network: exchange rates are fixed and statements are synthetic.
+
+- [AGENTS.md](AGENTS.md): rules and commands for contributors and AI coding agents (`CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` point to it)
+- [docs/architecture.md](docs/architecture.md): how a CSV becomes PIT-38 fields
+- [docs/tax-rules.md](docs/tax-rules.md): the tax rules implemented, their sources and control examples
+- [docs/testing.md](docs/testing.md): what the tests pin and how to add one
+- [docs/recipes.md](docs/recipes.md): step lists for common changes
 
 ## Support
 

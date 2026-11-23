@@ -1,0 +1,117 @@
+# Testing
+
+All automated tests are in `backend/tests/Pitly.Tests` (xUnit). They need no network and no Docker.
+
+```bash
+dotnet test backend/tests/Pitly.Tests/Pitly.Tests.csproj --nologo
+```
+
+One class or one test:
+
+```bash
+dotnet test backend/tests/Pitly.Tests/Pitly.Tests.csproj --filter FullyQualifiedName~EndToEndImportTests
+```
+
+```bash
+dotnet test backend/tests/Pitly.Tests/Pitly.Tests.csproj --filter FullyQualifiedName~Import_DividendTaxIsRoundedOnlyInTheDifference
+```
+
+The frontend has no tests. `npm run lint` and `npm run build` (which type-checks) are its automated checks;
+everything visual is checked in the browser.
+
+## What each file pins
+
+| File | What breaks it |
+|---|---|
+| `EndToEndImportTests.cs` | Anything between a CSV and the final PIT-38 fields: per-account FIFO and splits, duplicate uploads, withholding credit, the loss deduction, rounding of section G, the year cut-off, form numbering per year, warnings surviving a reopened session. |
+| `WithholdingAttributionTests.cs` | How withholding is tied to a payment: same-row withholding, other currencies, no crossing between accounts, proportional split, unmatched rows, the cap at tax actually withheld, account labels, operation ids. |
+| `CapitalGainsTaxCalculatorTests.cs` | FIFO matching by ISIN, commissions as costs, the buy-date rate for costs, splits, the message for missing history. |
+| `CorporateActionCalculatorTests.cs` | Reverse splits, ISIN changes, cash and stock mergers, spin-offs, cash in lieu, the opening-position check. |
+| `DividendTaxCalculatorTests.cs` | Summing and netting withholding rows, matching by income kind, the treaty cap and the statutory cap. |
+| `PriorYearLossCalculatorTests.cs` | The five-year window and the per-year limits. |
+| `TaxCalculatorTests.cs`, `ReviewFixesTests.cs` | `Pit38Fields.FromSummary`: rounding, the form layout of each year, years without a verified form. |
+| `StatementMergerTests.cs` | Overlapping and repeated statements. |
+| `InteractiveBrokersStatementParserTests.cs`, `InteractiveBrokersCorporateActionTests.cs`, `Trading212StatementParserTests.cs` | The CSV formats of both brokers. |
+| `DbSchemaUpgraderTests.cs` | Upgrading a database of an older schema: restored totals, a correct zero left alone, sessions flagged for re-import, a second run changing nothing. |
+| `UploadLimitTests.cs` | The Nginx limit equal to the API limit, Docker ports on `127.0.0.1`, a valid 2 MiB statement accepted, a file above 10 MiB rejected with `file_too_large`. |
+
+## Helpers
+
+- **`PitlyApp`** hosts the real application in-process (`WebApplicationFactory<Program>`): real endpoints,
+  parsers, calculators, SQLite and schema upgrade. Only two things are replaced: exchange rates are fixed
+  (USD = 4 PLN, EUR = 4.50 PLN) and the database is a temporary file deleted afterwards.
+  `ImportAsync(files, taxYear, residencyStartDate, priorYearLossesJson, accountLabelsJson)` posts multipart form
+  data the way the browser does; `GetAsync(url)` reads a stored session. The response wrapper gives
+  `Field("dochod")` for a PIT-38 field, `Pit38`, `Summary`, `Error`.
+- **`IbStatement`** builds an Interactive Brokers Activity Statement: `Instrument`, `Buy`, `Sell`, `Dividend`,
+  `Withholding`, `Interest`, `Split`, `OpeningPosition`, `PadTo(bytes)`, `Build()`.
+- **`Trading212Export`** builds a Trading 212 history export: `Buy`, `Sell`, `Dividend` (each with an operation
+  id), `Build()`.
+- **`TestRateService`** returns fixed rates. A key such as `"USD@2025-05-15"` sets the rate of one day.
+
+## Writing an end-to-end test
+
+Choose amounts that make the arithmetic obvious at 4 PLN per USD, and write the hand calculation next to the
+assertion.
+
+```csharp
+[Fact]
+public async Task Import_DividendTaxIsRoundedOnlyInTheDifference()
+{
+    var statement = new IbStatement("U1111111", 2025)
+        .Dividend("AAPL", "US0378331005", "2025-05-15", 25.75m)      // 103 PLN
+        .Withholding("AAPL", "US0378331005", "2025-05-15", 3.775m);  // 15.10 PLN
+
+    using var app = new PitlyApp();
+    var result = await app.ImportAsync([("2025.csv", statement.Build())]);
+
+    Assert.Equal(HttpStatusCode.OK, result.Status);
+    Assert.Equal(19.57m, result.Field("zryczaltowanyPodatek"));
+    Assert.Equal(15.10m, result.Field("podatekZaplaconyZaGranica"));
+    Assert.Equal(4m, result.Field("roznica"));
+}
+```
+
+Rules for new tests:
+
+- Synthetic statements only. Account numbers in tests are made up (`U1111111`, `U2222222`).
+- Fixed rates only; a test must not depend on the NBP API or on today's date.
+- A change in tax behaviour gets an end-to-end test, because the bug may sit in the merge, in the storage or in
+  the mapping rather than in the calculator.
+- Assert the fields a user would copy into the form, not only intermediate values.
+- When the CSV format matters (a new section or column), put the test next to the parser tests and build the
+  CSV text in the test.
+
+## Control examples
+
+These came from a review of the tax logic and must keep passing. The inputs are in
+[tax-rules.md](tax-rules.md).
+
+| Example | Expected | Test |
+|---|---|---|
+| A buys for 100 PLN, B buys for 300 PLN and sells for 350 PLN | income 50, A keeps cost 100 | `Import_SaleOnOneAccountDoesNotConsumeTheOtherAccountsLot`, `Import_ShareLeftOnTheFirstAccountKeepsItsOwnCost` |
+| A 2:1 split in both statements | each account doubles once | `Import_SplitReportedByBothStatementsDoublesEachAccountExactlyOnce` |
+| Same dividend on two accounts, one statement repeated | both count, the repeat adds nothing | `Import_SameDividendOnTwoAccountsCountsTwiceButARepeatedStatementDoesNot` |
+| Refund larger than the tax withheld on that payment | credit equals the tax actually withheld | `Import_CreditNeverExceedsTheTaxActuallyWithheldAfterCorrections` |
+| Income 10 000, loss deduction 10 000 | 0 PLN to pay everywhere | `Import_LossDeductionEqualToTheGainLeavesNothingToPayAnywhere` |
+| Dividend 103 PLN, credit 15.10 PLN, year 2025 | 19.57 / 15.10 / 4 in poz. 47 / 48 / 49 | `Import_DividendTaxIsRoundedOnlyInTheDifference` |
+| Full 2024, a 2025 sale without history | 2024 calculates, 2025 offers 2024 | `Import_LaterSaleWithoutHistoryDoesNotBlockTheEarlierYear` |
+| Prior-year losses | poz. 28 for 2024, poz. 30 for 2025 | `Import_PriorYearLossesAreNumberedByTheFormOfTheTaxYear` |
+
+## Checking the UI by hand
+
+1. Start the API and the frontend (see the commands in [AGENTS.md](../AGENTS.md)).
+2. Upload `samples/sample-activity-statement.csv`, or a statement built with the helpers above and saved to a
+   temporary file outside the repository.
+3. Look at the dashboard, the PIT-38 page and its print preview. The amount to pay must be the same in all
+   three.
+4. Switch the language to English, Ukrainian and Polish. Check that new text fits, including the collapsed and
+   the expanded sidebar.
+5. Check the browser console for errors.
+
+## Not covered by automated tests
+
+- An upload through Nginx inside Docker. Only the configuration is compared with the API limit.
+- The print layout. Print rules live in `frontend/src/index.css`.
+- Every frontend interaction.
+- The live NBP API.
