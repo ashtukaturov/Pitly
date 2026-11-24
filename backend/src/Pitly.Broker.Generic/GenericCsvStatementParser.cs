@@ -248,7 +248,7 @@ public sealed class GenericCsvStatementParser : IStatementParser
         var isin = row.Isin();
         var country = row.Country(symbol, isin, warnings);
         var dateTime = row.DateTime("operation_datetime");
-        row.OptionalDate("settlement_date");
+        var settleDate = row.OptionalDate("settlement_date");
         var currency = row.Currency();
 
         var quantity = row.Decimal("quantity");
@@ -302,7 +302,8 @@ public sealed class GenericCsvStatementParser : IStatementParser
             Type: type,
             Isin: isin,
             TransactionId: row.Get("tx_id"),
-            CountryCode: country);
+            CountryCode: country,
+            SettleDate: settleDate);
     }
 
     private static RawDividend ParseIncome(Row row, List<string> warnings)
@@ -450,12 +451,12 @@ public sealed class GenericCsvStatementParser : IStatementParser
                 $"Line {LineNumber}: '{name}' value '{raw}' is not a date. Use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.");
         }
 
-        /// <summary>Checked for format only: Pitly converts at the rate of the day before the operation date.</summary>
-        public void OptionalDate(string name)
-        {
-            if (Get(name) is not null)
-                DateTime(name);
-        }
+        /// <summary>
+        /// The date when the column is filled. Pitly converts at the rate of the day before the operation date and
+        /// counts the row in the year of that date; a settlement date is kept for the audit trail and the year-end check.
+        /// </summary>
+        public DateTime? OptionalDate(string name)
+            => Get(name) is null ? null : DateTime(name);
 
         public Money Currency()
         {

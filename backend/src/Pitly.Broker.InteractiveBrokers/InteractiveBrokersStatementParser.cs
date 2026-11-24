@@ -340,7 +340,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         // kind, otherwise that withholding matches no payment and its credit is lost.
         var description = Clean(fields[4]);
         var kind = IsPaymentInLieu(description) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
-        dividends.Add(new RawDividend(symbol, currency, date, amount, isin, kind, RawType: "Dividends", RawDescription: description));
+        dividends.Add(new RawDividend(symbol, currency, date, amount, isin, kind, RawType: "Dividends", RawDescription: description,
+            Distribution: DistributionReference.Parse(description)));
     }
 
     private static bool IsPaymentInLieu(string description)
@@ -355,7 +356,8 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
         var (symbol, isin, currency, date, amount) = row.Value;
         income.Add(new RawDividend(symbol, currency, date, amount, isin, IncomeKind.PaymentInLieu,
             RawType: "Payment In Lieu Of Dividends", RawDescription: Clean(fields[4]),
-            ClassificationNote: IncomeClassification.PaymentInLieuNote));
+            ClassificationNote: IncomeClassification.PaymentInLieuNote,
+            Distribution: DistributionReference.Parse(Clean(fields[4]))));
     }
 
     private void TryParseInterest(List<string> fields, List<RawDividend> income)
@@ -429,7 +431,10 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
             var (symbol, isin) = instrument.Value;
             // IB labels withholding on substitute payments "... Payment in Lieu of Dividend - US Tax".
             var kind = IsPaymentInLieu(description) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
-            taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin, kind, RawType: "Withholding Tax", RawDescription: description));
+            // The text of the distribution ("USD 0.31 per Share") is the statement's only link between a correction
+            // booked under its own day and the payment of another day it corrects.
+            taxes.Add(new RawWithholdingTax(symbol, currency, date, amount, isin, kind, RawType: "Withholding Tax", RawDescription: description,
+                Distribution: DistributionReference.Parse(description)));
             return;
         }
 
@@ -466,10 +471,10 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
     private static List<RawDividend> NetDividends(List<RawDividend> dividends)
     {
         return dividends
-            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind, d.Reference, d.ClassificationNote))
+            .GroupBy(d => (d.Symbol, d.Isin, d.Currency, d.Date, d.Kind, d.Reference, d.ClassificationNote, d.Distribution))
             .Select(g => new RawDividend(g.Key.Symbol, g.Key.Currency, g.Key.Date, g.Sum(d => d.Amount), g.Key.Isin, g.Key.Kind,
                 Reference: g.Key.Reference, RawType: g.First().RawType, RawDescription: Descriptions(g.Select(d => d.RawDescription)),
-                ClassificationNote: g.Key.ClassificationNote))
+                ClassificationNote: g.Key.ClassificationNote, Distribution: g.Key.Distribution))
             .Where(d => d.Amount > 0)
             .ToList();
     }
@@ -485,9 +490,10 @@ public partial class InteractiveBrokersStatementParser : IStatementParser
     private static List<RawWithholdingTax> NetWithholdingTaxes(List<RawWithholdingTax> taxes)
     {
         return taxes
-            .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date, t.Kind, t.Reference))
+            .GroupBy(t => (t.Symbol, t.Isin, t.Currency, t.Date, t.Kind, t.Reference, t.Distribution))
             .Select(g => new RawWithholdingTax(g.Key.Symbol, g.Key.Currency, g.Key.Date, -g.Sum(t => t.Amount), g.Key.Isin, g.Key.Kind,
-                Reference: g.Key.Reference, RawType: "Withholding Tax", RawDescription: Descriptions(g.Select(t => t.RawDescription))))
+                Reference: g.Key.Reference, RawType: "Withholding Tax", RawDescription: Descriptions(g.Select(t => t.RawDescription)),
+                Distribution: g.Key.Distribution))
             .Where(t => t.Amount != 0)
             .ToList();
     }

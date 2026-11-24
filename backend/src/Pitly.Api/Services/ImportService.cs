@@ -218,7 +218,9 @@ public class ImportService : IImportService
     /// <summary>Every year the statement has data for: a Trading 212 export can span several years.</summary>
     private static IEnumerable<int> GetCoveredYears(ParsedStatement statement)
     {
+        // A sale that settles in the next year may belong to that year's return, so the year is offered.
         var years = statement.Trades.Select(t => t.DateTime.Year)
+            .Concat(statement.Trades.Where(t => t.SettleDate is not null).Select(t => t.SettleDate!.Value.Year))
             .Concat(statement.Dividends.Select(d => d.Date.Year))
             .Concat(statement.WithholdingTaxes.Select(t => t.Date.Year))
             .Concat((statement.CorporateActions ?? []).Select(a => a.DateTime.Year))

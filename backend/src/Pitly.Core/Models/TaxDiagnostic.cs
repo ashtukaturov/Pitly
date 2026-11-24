@@ -49,6 +49,10 @@ public static class DiagnosticCodes
     public const string SourceConflict = "SOURCE_CONFLICT";
     /// <summary>The issuer's country has no treaty rate on file (or cannot be told), so the foreign tax was not credited under the treaty cap.</summary>
     public const string TreatyRateUnknown = "TREATY_RATE_UNKNOWN";
+    /// <summary>Interest rounded per payment gives another figure than the same interest rounded once on the yearly total; the policy says which is used.</summary>
+    public const string InterestRoundingLevel = "INTEREST_ROUNDING_LEVEL";
+    /// <summary>A sale executed in one year that settles (or may settle) in the next: which year's return it belongs to is not decided by Pitly.</summary>
+    public const string RecognitionDate = "RECOGNITION_DATE";
 }
 
 /// <summary>

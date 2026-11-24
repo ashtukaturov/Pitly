@@ -198,6 +198,19 @@ function PolicyNote({ pit38 }: { pit38: Pit38Fields }) {
       <p className="break-words">
         <span className="text-slate-400">{t('diag.policy.sources')}</span> {policy.sources.join(' · ')}
       </p>
+      {pit38.datePolicy && (
+        <>
+          <p className="text-slate-400 font-medium pt-1">{t('diag.dates.title', { version: pit38.datePolicy.version })}</p>
+          <p>
+            <span className="text-slate-400">{t('diag.dates.recognition')}</span> {pit38.datePolicy.recognitionRule}
+            {pit38.datePolicy.recognitionRuleIsInterpretation && <span className="text-amber-400/80"> {t('diag.policy.assumption')}</span>}
+          </p>
+          <p><span className="text-slate-400">{t('diag.dates.rate')}</span> {pit38.datePolicy.rateRule}</p>
+          <p className="break-words">
+            <span className="text-slate-400">{t('diag.policy.sources')}</span> {pit38.datePolicy.sources.join(' · ')}
+          </p>
+        </>
+      )}
     </div>
   );
 }

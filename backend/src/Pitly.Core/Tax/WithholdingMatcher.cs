@@ -10,10 +10,15 @@ namespace Pitly.Core.Tax;
 ///   2. a complete, unambiguous match: same account, same kind of income, same instrument (ISIN against ISIN,
 ///      ticker against ticker, never one against the other), same reference date, same currency; for credit
 ///      interest the instrument is the currency and the reference is the interest period when both rows name one;
-///   3. the same match in another currency, when exactly one payment fits.
+///   3. the same match in another currency, when exactly one payment fits;
+///   4. the broker's text of the distribution on another day (IB prints "USD 0.31 per Share" on every row of one
+///      distribution and an Activity Statement books a correction under the day it was made): the event is tied
+///      to the one payment of the instrument that carries the same text. The text names a distribution, not a
+///      payment, so several payments with it stay ambiguous and the years of all of them are reported.
 /// A row that fits no payment, or several interest payments, is left unresolved with a reason: nothing is
-/// attributed by proximity, and an excess refund never moves to another payment. Several dividend rows of one
-/// instrument on one pay date are one distribution event, so one tax row of that event is shared between them.
+/// attributed by proximity (a similar amount, the nearest date), and an excess refund never moves to another
+/// payment. Several dividend rows of one instrument on one pay date are one distribution event, so one tax row of
+/// that event is shared between them.
 /// </summary>
 public static class WithholdingMatcher
 {
@@ -88,8 +93,10 @@ public static class WithholdingMatcher
                 // No payment carries this action id (a reclassification gets a new id): fall through to the full match.
             }
 
-            // 2. The complete match in the currency of the event, 3. then in any currency.
-            var exact = payments.Where(p => SameAccount(p, e) && SameKind(p, e) && SameInstrument(p, e) && SameReference(p, e)).ToList();
+            // 2. The complete match in the currency of the event, 3. then in any currency. When both rows print the
+            //    broker's text of the distribution, it has to agree too: a refund of last year's distribution booked
+            //    on this year's pay day is not this year's tax.
+            var exact = payments.Where(p => SameAccount(p, e) && SameKind(p, e) && SameInstrument(p, e) && SameReference(p, e) && SameDistribution(p, e)).ToList();
             var sameCurrency = exact.Where(p => p.Currency.Equals(e.Currency, StringComparison.OrdinalIgnoreCase)).ToList();
             var candidates = sameCurrency.Count > 0 ? sameCurrency : exact;
 
@@ -115,6 +122,37 @@ public static class WithholdingMatcher
                     $"{Describe(e)} fits {candidates.Count} candidate {KindLabel(e.Kind)} payments on account {Account(e)} ({listed}){why}, " +
                     "so it was not attributed to any of them.", candidates));
                 continue;
+            }
+
+            // 4. The broker's text of the distribution on another day. It is the broker's own identification of the
+            //    distribution, never a similar amount or the nearest date; but it identifies a payment only when one
+            //    payment of the instrument carries it.
+            if (!string.IsNullOrWhiteSpace(e.Distribution))
+            {
+                var byDistribution = payments.Where(p => SameAccount(p, e) && SameKind(p, e) && SameInstrument(p, e) &&
+                                                         string.Equals(p.Distribution, e.Distribution, StringComparison.OrdinalIgnoreCase)).ToList();
+                var byDistributionSameCurrency = byDistribution.Where(p => p.Currency.Equals(e.Currency, StringComparison.OrdinalIgnoreCase)).ToList();
+                var byText = byDistributionSameCurrency.Count > 0 ? byDistributionSameCurrency : byDistribution;
+                if (byText.Count == 1)
+                {
+                    byPayment[byText[0]].Links.Add(new Link(e, 1m));
+                    continue;
+                }
+
+                if (byText.Count > 1)
+                {
+                    if (byDistributionSameCurrency.Count == byText.Count && SameDistributionEvent(byText))
+                    {
+                        ShareBetween(e, byText, byPayment, shared);
+                        continue;
+                    }
+
+                    var listed = string.Join(", ", byText.OrderBy(p => p.Date).Take(4).Select(p => $"{Money(p.Amount, p.Currency)} on {p.Date:yyyy-MM-dd}"));
+                    unresolved.Add(new Unresolved(e, DiagnosticCodes.AmbiguousMatch,
+                        $"{Describe(e)} carries the broker's text \"{e.Distribution}\", which {byText.Count} {KindLabel(e.Kind)} payments of {Instrument(e)} on account {Account(e)} carry too ({listed}); " +
+                        "the text names the distribution, not the payment, so the event was not attributed to any of them.", byText));
+                    continue;
+                }
             }
 
             // Nothing fits. Say whether the instrument is in the history at all, so that the user knows what to upload.
@@ -159,8 +197,17 @@ public static class WithholdingMatcher
                    $"that is not in the uploaded history: the statement with that payment ({e.Date.Year}) is not uploaded. The refund was not applied anywhere.";
         }
 
+        if (!string.IsNullOrWhiteSpace(e.Distribution))
+        {
+            // The text of the distribution is on the row and no uploaded payment carries it: the payment is missing.
+            return $"A withholding-tax refund of {Money(-e.Amount, e.Currency)} for {Instrument(e)} dated {ReferenceLabel(e)} carries the broker's text \"{e.Distribution}\" " +
+                   $"of the distribution it corrects, and none of the {Instrument(e)} payments in the uploaded history (dated {Dates(near)}) carries it: " +
+                   "the statement with that payment is not uploaded. The refund was not applied anywhere.";
+        }
+
         return $"A withholding-tax refund of {Money(-e.Amount, e.Currency)} for {Instrument(e)} dated {ReferenceLabel(e)} matches none of the {Instrument(e)} payments " +
-               $"in the uploaded history (dated {Dates(near)}). The refund was not applied anywhere.";
+               $"in the uploaded history by date (dated {Dates(near)}), and the row gives no text of the distribution it corrects, so it may reverse tax withheld on any of them. " +
+               "The refund was not applied anywhere.";
     }
 
     private static bool SameAccount(RawDividend p, RawWithholdingTax e)
@@ -180,6 +227,11 @@ public static class WithholdingMatcher
 
         return p.Symbol.Trim().Equals(e.Symbol.Trim(), StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>Two rows that both print the broker's text of the distribution are one event only when the texts agree.</summary>
+    private static bool SameDistribution(RawDividend p, RawWithholdingTax e)
+        => string.IsNullOrWhiteSpace(p.Distribution) || string.IsNullOrWhiteSpace(e.Distribution) ||
+           string.Equals(p.Distribution, e.Distribution, StringComparison.OrdinalIgnoreCase);
 
     private static bool SameReference(RawDividend p, RawWithholdingTax e)
     {

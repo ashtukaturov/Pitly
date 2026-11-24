@@ -21,9 +21,13 @@ public class NbpExchangeRateService : INbpExchangeRateService
     }
 
     public async Task<decimal> GetRateAsync(string currency, DateTime transactionDate)
+        => (await GetQuoteAsync(currency, transactionDate)).Rate;
+
+    /// <summary>The rate with the day of the NBP table it was taken from (the day before the operation, or the last business day before that).</summary>
+    public async Task<ExchangeRateQuote> GetQuoteAsync(string currency, DateTime transactionDate)
     {
         if (currency.Equals("PLN", StringComparison.OrdinalIgnoreCase))
-            return 1m;
+            return new ExchangeRateQuote(1m, null);
         const int maxAttempts = 10;
 
         // Polish tax law: rate from last business day BEFORE the transaction date
@@ -36,7 +40,7 @@ public class NbpExchangeRateService : INbpExchangeRateService
             var cacheKey = $"{currency.ToUpperInvariant()}_{dateStr}";
 
             if (_cache.TryGetValue(cacheKey, out var cached))
-                return cached;
+                return new ExchangeRateQuote(cached, rateDate);
 
             HttpResponseMessage? response = null;
             Exception? transportError = null;
@@ -100,7 +104,7 @@ public class NbpExchangeRateService : INbpExchangeRateService
 
                 _cache.TryAdd(cacheKey, rate);
                 _logger.LogDebug("NBP rate for {Currency} on {Date}: {Rate}", currency, dateStr, rate);
-                return rate;
+                return new ExchangeRateQuote(rate, rateDate);
             }
         }
 

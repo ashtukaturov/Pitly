@@ -11,6 +11,10 @@ internal sealed class TestRateService : INbpExchangeRateService
         _rates = rates;
     }
 
+    /// <summary>The fixed rate, dated as the NBP table of the day before the operation would be.</summary>
+    public async Task<ExchangeRateQuote> GetQuoteAsync(string currency, DateTime transactionDate)
+        => new(await GetRateAsync(currency, transactionDate), transactionDate.Date.AddDays(-1));
+
     public Task<decimal> GetRateAsync(string currency, DateTime transactionDate)
     {
         var datedKey = $"{currency}@{transactionDate:yyyy-MM-dd}";

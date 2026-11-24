@@ -251,16 +251,34 @@ public class DividendTaxCalculator : IDividendTaxCalculator
             {
                 var e = u.Event;
                 var pln = Math.Abs(e.Amount) * await RateAsync(rates, e.Currency, e.EffectiveDate);
-                var years = new[] { e.Date.Year }.Concat(e.BookingYear is { } y ? [y] : Array.Empty<int>()).Distinct().OrderBy(x => x).ToList();
-                if (EventShown(e))
+
+                // The years the finding may change: the event's own, and the years of the payments it could belong
+                // to. An unresolved event that fits several payments touches all of them; a refund without the
+                // broker's text of its distribution may reverse tax withheld on any earlier payment of the
+                // instrument, so the return of each of those years shows the open question, not only the year of
+                // the refund row. A refund whose text no uploaded payment carries belongs to a missing statement
+                // and touches no uploaded year.
+                var possible = u.Code == DiagnosticCodes.AmbiguousMatch
+                    ? u.Candidates
+                    : e.Amount < 0m && string.IsNullOrWhiteSpace(e.Distribution)
+                        ? u.Candidates.Where(p => p.Date.Date <= e.Date.Date).ToList()
+                        : [];
+                var years = new[] { e.Date.Year }
+                    .Concat(e.BookingYear is { } y ? [y] : Array.Empty<int>())
+                    .Concat(possible.Select(p => p.Date.Year))
+                    .Distinct().OrderBy(x => x).ToList();
+                var otherYears = years.Where(x => x != e.Date.Year && x != e.BookingYear).ToList();
+                var reach = otherYears.Count == 0
+                    ? string.Empty
+                    : $" The {e.Symbol} payments of {string.Join(", ", otherYears)} may be affected: upload the Flex Query of the account, whose rows carry the broker's action id, or confirm the link by hand.";
+
+                if (years.Any(YearShown))
                 {
                     Add(new TaxDiagnostic(u.Code, DiagnosticSeverity.Warning,
-                        u.Reason + $" {Pln(pln)} of foreign tax is not in the declared amounts.",
+                        u.Reason + $" {Pln(pln)} of foreign tax is not in the declared amounts." + reach,
                         e.SourceFile, e.AccountId, years, pln, AffectsAmounts: true));
-                }
-
-                if (EventShown(e))
                     eventRecords.Add(await ToEventAsync(rates, e, WithholdingEventStatus.Unresolved, null, pln, u.Code));
+                }
             }
         }
 

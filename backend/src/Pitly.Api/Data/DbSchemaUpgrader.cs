@@ -43,6 +43,8 @@ public static class DbSchemaUpgrader
         ("TradeResults", "Note", "TEXT NULL"),
         ("TradeResults", "Isin", "TEXT NULL"),
         ("TradeResults", "CountryCode", "TEXT NULL"),
+        ("TradeResults", "SettleDate", "TEXT NULL"),
+        ("TradeResults", "RateDate", "TEXT NULL"),
         ("Dividends", "Isin", "TEXT NULL"),
         ("Dividends", "Kind", "TEXT NOT NULL DEFAULT 'Dividend'"),
         ("Dividends", "CreditableWithholdingPln", "TEXT NOT NULL DEFAULT '0.0'"),

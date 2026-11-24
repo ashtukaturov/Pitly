@@ -16,8 +16,20 @@ Verify those two before quoting them.
 ## Conversion to PLN
 
 Each amount is converted at the NBP mid rate of the last business day before the transaction date (art. 11a
-ust. 1 and 2 ustawy o PIT). The trade date is used, not the settlement date; the README lists this as a
-limitation.
+ust. 1 and 2 ustawy o PIT).
+
+**Trades: the trade date, with the settlement date kept (Pitly's reading, versioned in `DatePolicy`).** A sale is
+counted in the year of its trade (execution) date and converted at the rate of the day before it; a purchase is
+costed as of its trade date. Art. 17 ust. 1ab pkt 1 ties the income from a sale of securities to the transfer of
+ownership, which for dematerialised securities is the entry on the securities account (art. 7 ust. 2 ustawy o
+obrocie instrumentami finansowymi), that is the settlement day; the trade date is what statements and most
+practice use. Pitly does not decide between the two readings. Every result row carries the audit trail: the
+trade date, the settlement date when the statement gives one (IB Flex `SettleDateTarget`, generic
+`settlement_date`; the Activity Statement and Trading 212 give none), the day of the NBP table actually used and
+the rate. A sale executed in one year that settles in the next is reported for both years as `RECOGNITION_DATE`
+(blocking) and so is a sale in the last three days of December whose statement gives no settlement date; the
+user confirms the year. Within a year the two readings differ only by the rate of a day or two, which is shown,
+not flagged.
 
 Tax paid abroad is converted at the rate of the day before it was paid (art. 11a ust. 3: "zapłaty podatku").
 Tax withheld on the day of the payment therefore shares the payment's rate. Tax paid or re-charged on another day
@@ -126,7 +138,16 @@ afterwards. Inside one account, in this order:
    against the other), same reference date, same currency. For credit interest the instrument is the currency and
    the reference is the interest period when both rows name one (`CREDIT INT FOR JAN-2025`); a tax row for another
    period does not match;
-3. the same match in another currency, when exactly one payment fits.
+3. the same match in another currency, when exactly one payment fits;
+4. the broker's text of the distribution on another day. IB prints the amount per share on every row of one
+   distribution ("TLT(US...) Cash Dividend USD 0.310122 per Share - US Tax", kept as `Distribution` =
+   `USD 0.310122 PER SHARE` by `DistributionReference`), and an Activity Statement books a correction under the
+   day it was made with that text: it is the only link the statement gives between a refund of the next year and
+   the payment it corrects. The event is tied to the one payment of the instrument that carries the same text.
+   The text names a distribution, not a payment (a fixed quarterly dividend prints it four times), so several
+   payments with it stay `AMBIGUOUS_MATCH`; a text no uploaded payment carries means the payment is missing. In
+   step 2, two rows that both carry a text are one event only when the texts agree, so a refund of last year's
+   distribution booked on this year's pay day is not this year's tax.
 
 Several dividend rows of one instrument, account, pay date and currency are one distribution event; one tax row
 of that event is shared between them in proportion to their gross amounts and the sharing is noted
@@ -136,9 +157,15 @@ that fits two interest rows is unresolved.
 Anything else is unresolved and reported with the amount that is therefore not in the declared figures:
 `UNMATCHED_WHT` (no payment fits; the message says whether the instrument is in the history at all, so "statement
 not uploaded" is only said when the payment really is absent), `AMBIGUOUS_MATCH` (several fit),
-`UNKNOWN_INCOME_KIND` (the row names neither an instrument nor interest). Nothing is attributed by proximity and
-nothing is split by assumption. Unmatched rows that cancel each other out (a booking and its reversal of a
-payment that was itself reversed) are only noted.
+`UNKNOWN_INCOME_KIND` (the row names neither an instrument nor interest). Nothing is attributed by proximity (a
+similar amount, the nearest date) and nothing is split by assumption. Unmatched rows that cancel each other out
+(a booking and its reversal of a payment that was itself reversed) are only noted.
+
+The years an unresolved finding is reported for are the years it may change, not only the year of the row: an
+ambiguous event touches the years of every payment it fits, and a refund without the broker's text of its
+distribution may reverse tax withheld on any earlier payment of the instrument, so the return of each of those
+years shows the open question and is not ready. A refund whose text no uploaded payment carries belongs to a
+missing statement and touches only its own year.
 
 Control examples (USD at 4 PLN, PLN at 1):
 
@@ -149,6 +176,11 @@ Control examples (USD at 4 PLN, PLN at 1):
 | Two interest rows of one day and currency without a period, one tax row without a period (possible in a Flex Query or a generic file). | Credit 0; `AMBIGUOUS_MATCH` naming the 2 candidates. |
 | A withholding row `WITHHOLDING ON SOMETHING ELSE` without ISIN. | `UNKNOWN_INCOME_KIND`; the amount is not credited. |
 | Flex, one `ActionID`: dividend 80 PLN with 12 withheld, payment in lieu 20 PLN with 3 withheld (the tax row says "Payment in Lieu"). | Credit 12 + 3 = 15, difference 4; no `AMBIGUOUS_MATCH`. The payment in lieu carries a blocking `CLASSIFICATION_UNVERIFIED`. |
+| Activity 2024: dividend 6.20 USD on 2024-02-07 ("USD 0.31 per Share"), 0.93 withheld. Activity 2025: refund of 0.93 USD dated 2025-02-13 with the same text. | Tied to the 2024 payment: 2024 credit 0, flat tax 4.71, difference 5; `CROSS_YEAR_ADJUSTMENT` for 2024 and 2025. The Flex Query (`ActionID`) and the mix of both formats give the same fields. |
+| The same, but 2024 has two distributions with the same text (0.25 per share, 2024-02-07 and 2024-05-07). | `AMBIGUOUS_MATCH` for 2024 and 2025 with 3.72 PLN unresolved; the 2024 credit stays 7.44 and 2024 is not ready. |
+| The same, but the refund's text names no amount per share. | `UNMATCHED_WHT` for 2024 and 2025; 2024 keeps its credit and is not ready. |
+| The refund's text (0.33 per share) matches no uploaded payment. | `UNMATCHED_WHT` for 2025 only ("not uploaded"); 2024 stays ready. |
+| One day, two distributions of one instrument with different texts: 100 USD "0.25 per Share" with 15.01 USD withheld, 50 USD "1 per Share" with nothing withheld. | Two rows; the cap applies to each: 15.00 USD creditable on the first, nothing on the second, credit 60 PLN (netted into one row it would have been 60.04). |
 
 ### Refunds and corrections
 
@@ -213,7 +245,17 @@ says the credit was capped at 19%, not at a treaty rate).
 
 **Two formats of one account (`SOURCE_CONFLICT`, blocking).** See [architecture.md](architecture.md), "Accounts
 and merging": where an Activity Statement and a Flex Query of one account disagree on the same day's operations,
-the second file's rows are left out and the finding names both figures.
+the second file's rows are left out and the finding names both figures. The finding carries the years it can
+change (a purchase: its year and every later year of the upload; a refund: its booking year and every earlier
+year of the upload; other income rows: their year) and is shown only for those years, so a conflict on a 2026
+purchase does not block the 2025 return.
+
+**A sale at the year end (`RECOGNITION_DATE`, blocking).** See "Conversion to PLN": a sale that settles in the
+next year, or one in the last days of December without a settlement date, is reported for both years until the
+user confirms the year.
+
+**Interest rounded per payment (`INTEREST_ROUNDING_LEVEL`, a warning that does not block).** See "Rounding of
+section G": when the yearly total would round to another figure, the result names both.
 
 **Treaty rate unknown (`TREATY_RATE_UNKNOWN`, blocking).** See "Foreign tax credit".
 
@@ -250,8 +292,12 @@ up to the grosz.
 the yearly total: each payment is a separate base from which a Polish payer would withhold the tax, so the sum of
 the per-payment taxes is what a payer would have withheld, and a reopened session rounds from its stored rows the
 same way. Two payments of 0.1051 PLN give 0.03 + 0.03 = 0.06 PLN, where rounding the total (0.2102 → 0.22 × 19% =
-0.0418 → 0.05) would differ by a grosz. No source states the level explicitly; the choice is recorded in
-`RoundingPolicy.Current` and changes the version when it changes.
+0.0418 → 0.05) would differ by a grosz. No source states the level explicitly: art. 63 § 1a fixes the direction
+of rounding, not the level at which a self-assessed return aggregates the base. The choice is recorded in
+`RoundingPolicy.Current` (version `2025.3`) and changes the version when it changes; whenever the yearly total
+would round to another figure the result says so (`INTEREST_ROUNDING_LEVEL`, naming both figures and the
+difference; it does not block, because the difference is a recorded policy, not missing data). Agreement with
+another calculator that rounds the yearly total proves neither reading.
 
 Control example, tax year 2025: dividends 103 PLN, creditable tax paid abroad 15.10 PLN. Flat tax 19.57
 (poz. 47), paid abroad 15.10 (poz. 48), difference 4.47, entered as 4 (poz. 49).

@@ -94,25 +94,36 @@ genuinely identical trades in one file are both kept. A byte-identical file is s
 
 Two formats of one account describe the same operations at different levels: the Activity Statement shows an
 order and nets the withholding rows of a day, the Flex Query lists executions and single tax rows. After the
-row-level comparison, `ReconcileAcrossFormats` compares the rows the row-level step did not recognise, one
-instrument, day and side at a time, with what files of the other format family (`ParserVersion` before the
-slash) of the same account contributed: a subset of the new rows whose quantity, amount and fees add up to one
-other-format file's rows, to one other-format row, or to the other format's rows booked in this file's year is
-the same operations and is skipped (subsets are enumerated for groups of up to twelve rows). Rows left over are
-kept unless the other format already covers them, that is has a file for the row's booking year whose rows of
-that kind span the row's date; then they are a `SOURCE_CONFLICT` (blocking): left out so that nothing is doubled,
-and reported with both figures. The merger also produces `OVERLAP_SKIPPED` and `ACCOUNT_ASSUMED`.
+row-level comparison, `ReconcileAcrossFormats` compares each group of one instrument, day and side with what
+files of the other format family (`ParserVersion` before the slash) of the same account contributed, keeping a
+ledger of what each side has already explained: a group whose quantity, amount and fees add up to the same on
+both sides is the same operations and the new rows are skipped; otherwise a row the row-level step recognised
+has used up the other-format row of the same content, and the rows left on the new side are matched, subset
+against subset, with the rows left on the other side (one file's, one format's, the rows booked in this file's
+year, single rows, or any subset while a side has at most twelve rows). Rows an earlier file of the same format
+already explained are not available again. Rows left over on either side are kept unless the other format
+already covers them, that is has a file for the row's booking year whose rows of that kind span the row's date;
+then they are a `SOURCE_CONFLICT` (blocking): the new file's leftovers are left out so that nothing is doubled,
+and the finding names both figures and the tax years it can change (a purchase: its year and the later years
+of the upload; a refund: its booking year and the earlier years; other income: its year). `TaxCalculator` shows
+a finding only for the years it names. The merger also produces `OVERLAP_SKIPPED` and `ACCOUNT_ASSUMED`.
 
 ## Tax calculation (`Pitly.Core/Tax`)
 
 - `CapitalGainsTaxCalculator` runs once per account: it replays trades and corporate actions in time order up
   to the last day of the tax year, keeps FIFO lots per ISIN (ticker when there is no ISIN), and compares the
   reconstructed position with the opening position the statement reports. Sales inside the taxable window
-  become result rows; everything dated after the year is ignored.
+  become result rows; everything dated after the year is ignored. The trade date sets the year and the rate
+  (`INbpExchangeRateService.GetQuoteAsync` returns the rate with the day of the NBP table); each result row
+  keeps the settlement date the statement gave and that table day (`DatePolicy`), and a sale that settles in
+  the next year, or one in the last days of December without a settlement date, is reported as
+  `RECOGNITION_DATE` for both years.
 - `WithholdingMatcher` ties every withholding event to its payment over the whole uploaded history, inside one
   account: first by the broker's own `ActionId`, then by a complete match (kind of income, instrument with ISIN
-  against ISIN or ticker against ticker, reference date or interest period, currency), then the same match in
-  another currency when exactly one payment fits. Several dividend rows of one instrument, account, pay date and
+  against ISIN or ticker against ticker, reference date or interest period, currency, and the broker's text of
+  the distribution when both rows carry one), then the same match in another currency when exactly one payment
+  fits, then by the broker's text of the distribution alone (`DistributionReference`, "USD 0.31 PER SHARE")
+  when exactly one payment of the instrument carries it. Several dividend rows of one instrument, account, pay date and
   currency are one distribution event and share one tax row in proportion to their gross amounts (reported as
   `SHARED_WITHHOLDING`); interest rows are never shared. Anything else is `Unresolved` with a code and a reason.
 - `DividendTaxCalculator` converts each payment to PLN, nets the events tied to it per currency (a refund cancels

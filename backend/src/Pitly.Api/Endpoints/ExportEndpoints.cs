@@ -20,7 +20,7 @@ public static class ExportEndpoints
                 return Results.NotFound(new { error = "Session not found" });
 
             var sb = new StringBuilder();
-            sb.AppendLine("Section,Date,Symbol,Type,Quantity,Price,Proceeds (Original),Commission,Currency,Exchange Rate,Proceeds (PLN),Cost (PLN),Gain/Loss (PLN),Note");
+            sb.AppendLine("Section,Date,Symbol,Type,Quantity,Price,Proceeds (Original),Commission,Currency,Exchange Rate,Proceeds (PLN),Cost (PLN),Gain/Loss (PLN),Note,Settlement Date,NBP Rate Date");
 
             foreach (var t in session.TradeResults.OrderBy(t => t.DateTime))
             {
@@ -37,7 +37,9 @@ public static class ExportEndpoints
                     t.ProceedsPln.ToString("F2", CultureInfo.InvariantCulture),
                     t.CostPln.ToString("F2", CultureInfo.InvariantCulture),
                     t.GainLossPln.ToString("F2", CultureInfo.InvariantCulture),
-                    CsvQuote(t.Note)));
+                    CsvQuote(t.Note),
+                    t.SettleDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
+                    t.RateDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty));
             }
 
             sb.AppendLine();

@@ -14,9 +14,10 @@ namespace Pitly.Core.Parsing;
 /// of the same order in the same second) are kept.
 /// Two formats of one broker describe the same operations at different levels (an Activity Statement shows an
 /// order, the Flex Query its executions), so after the row-level comparison the rows of one instrument, day and
-/// side are compared as a group across formats: equal quantity, amount and fees mean the same operations and the
-/// group is skipped; equal quantity with different amounts is a conflict, which is reported as blocking and never
-/// doubled.
+/// side are compared as a group across formats, with a ledger of what each side has already explained: equal
+/// quantity, amount and fees mean the same operations and the group is skipped; what one format has and the
+/// other, though it covers that day, does not explain is a conflict, which is reported as blocking for the years
+/// it can change and never doubled.
 /// Every row leaves the merger stamped with the account it belongs to and the file it came from, so FIFO queues,
 /// corporate actions and withholding matching stay inside one account and every finding can name its source.
 /// </summary>
@@ -88,6 +89,21 @@ public static class StatementMerger
         var dividendOrigins = new Dictionary<object, Origin>(ReferenceEqualityComparer.Instance);
         var withholdingOrigins = new Dictionary<object, Origin>(ReferenceEqualityComparer.Instance);
 
+        // The years a conflict can change: a purchase adds lots that serve every later sale, so a conflict on a
+        // trade touches its year and every year after it in the upload; a conflict on an income row touches the
+        // year it was booked in. Reported so that a conflict of a later year never blocks an earlier return.
+        var lastYear = Math.Max(targetYear, statements.SelectMany(f => f.Statement.Trades).Select(t => t.DateTime.Year).DefaultIfEmpty(targetYear).Max());
+        IReadOnlyList<int> YearsFrom(int year) => Enumerable.Range(year, Math.Max(1, lastYear - year + 1)).ToList();
+        // A refund reverses tax withheld on a payment of its own year or any earlier uploaded year.
+        var firstIncomeYear = statements.SelectMany(f => f.Statement.Dividends.Select(d => d.Date.Year).Concat(f.Statement.WithholdingTaxes.Select(w => w.Date.Year))).DefaultIfEmpty(targetYear).Min();
+        IReadOnlyList<int> YearsUpTo(int year) => Enumerable.Range(Math.Min(firstIncomeYear, year), Math.Max(1, year - Math.Min(firstIncomeYear, year) + 1)).ToList();
+
+        // Rows of one format that a file of the other format has already explained (a row-level duplicate, or a
+        // set of rows that added up to them). They cannot explain a later file's rows a second time.
+        var explainedTrades = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var explainedDividends = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var explainedWithholding = new HashSet<object>(ReferenceEqualityComparer.Instance);
+
         foreach (var file in ordered)
         {
             var name = file.Name;
@@ -100,48 +116,46 @@ public static class StatementMerger
                 DateRange.Of(statement.Trades.Select(t => t.DateTime.Date)),
                 DateRange.Of(statement.Dividends.Select(d => d.Date.Date)),
                 DateRange.Of(statement.WithholdingTaxes.Select(w => w.Date.Date)));
-            var conflicts = new List<string>();
+            var conflicts = new List<Conflict>();
 
             var fileTrades = statement.Trades.Select(t => t with { AccountId = acct }).ToList();
             var newTrades = new List<Trade>();
-            var skippedTrades = TakeNew(
-                fileTrades, newTrades, seenTrades,
-                t => Key(acct, "row", t.Symbol.ToUpperInvariant(), t.Isin, t.Currency, Stamp(t.DateTime), Num(t.Quantity), Num(t.Price), Num(t.Proceeds), Num(t.Commission), t.Type.ToString()),
-                t => IdKey(acct, t.TransactionId));
+            Func<Trade, string> tradeContent = t => Key(acct, "row", t.Symbol.ToUpperInvariant(), t.Isin, t.Currency, Stamp(t.DateTime), Num(t.Quantity), Num(t.Price), Num(t.Proceeds), Num(t.Commission), t.Type.ToString());
+            var skippedTrades = TakeNew(fileTrades, newTrades, seenTrades, tradeContent, t => IdKey(acct, t.TransactionId));
             skippedTrades += ReconcileAcrossFormats(
-                fileTrades, newTrades, trades, tradeOrigins, origin,
+                fileTrades, newTrades, trades, tradeOrigins, explainedTrades, origin,
                 t => Key(acct, t.Symbol.ToUpperInvariant(), t.Currency, Stamp(t.DateTime.Date), t.Type.ToString()),
+                tradeContent,
                 t => new Totals(t.Quantity, t.Proceeds, t.Commission),
                 t => t.DateTime.Year, t => t.DateTime.Date, o => o.Trades,
-                t => $"{t.Type} {t.Symbol} on {t.DateTime:yyyy-MM-dd}", "shares", conflicts);
+                t => $"{t.Type} {t.Symbol} on {t.DateTime:yyyy-MM-dd}", t => YearsFrom(t.DateTime.Year), "shares", conflicts);
             foreach (var t in newTrades) { trades.Add(t); tradeOrigins[t] = origin; }
 
             var fileDividends = statement.Dividends.Select(d => d with { AccountId = acct, SourceFile = d.SourceFile ?? name }).ToList();
             var newDividends = new List<RawDividend>();
-            var skippedDividends = TakeNew(
-                fileDividends, newDividends, seenDividends,
-                d => Key(acct, "row", d.Symbol.ToUpperInvariant(), d.Isin, d.Currency, Stamp(d.Date), Num(d.Amount), d.Kind.ToString(), Num(d.WithheldAmount ?? 0m), d.WithheldCurrency),
-                d => IdKey(acct, d.TransactionId));
+            Func<RawDividend, string> dividendContent = d => Key(acct, "row", d.Symbol.ToUpperInvariant(), d.Isin, d.Currency, Stamp(d.Date), Num(d.Amount), d.Kind.ToString(), Num(d.WithheldAmount ?? 0m), d.WithheldCurrency);
+            var skippedDividends = TakeNew(fileDividends, newDividends, seenDividends, dividendContent, d => IdKey(acct, d.TransactionId));
             skippedDividends += ReconcileAcrossFormats(
-                fileDividends, newDividends, dividends, dividendOrigins, origin,
+                fileDividends, newDividends, dividends, dividendOrigins, explainedDividends, origin,
                 d => Key(acct, d.Symbol.ToUpperInvariant(), d.Currency, Stamp(d.Date), d.Kind.ToString()),
+                dividendContent,
                 d => new Totals(d.Amount, d.WithheldAmount ?? 0m, 0m),
                 d => (d.BookingDate ?? d.Date).Year, d => d.Date.Date, o => o.Dividends,
-                d => $"{WithholdingMatcher.KindLabel(d.Kind)} {d.Symbol} on {d.Date:yyyy-MM-dd}", "units", conflicts);
+                d => $"{WithholdingMatcher.KindLabel(d.Kind)} {d.Symbol} on {d.Date:yyyy-MM-dd}", d => [(d.BookingDate ?? d.Date).Year], "units", conflicts);
             foreach (var d in newDividends) { dividends.Add(d); dividendOrigins[d] = origin; }
 
             var fileWithholding = statement.WithholdingTaxes.Select(w => w with { AccountId = acct, SourceFile = w.SourceFile ?? name }).ToList();
             var newWithholding = new List<RawWithholdingTax>();
-            var skippedWithholding = TakeNew(
-                fileWithholding, newWithholding, seenWithholding,
-                w => Key(acct, "row", w.Symbol.ToUpperInvariant(), w.Isin, w.Currency, Stamp(w.Date), Num(w.Amount), w.Kind.ToString()),
-                w => IdKey(acct, w.TransactionId));
+            Func<RawWithholdingTax, string> withholdingContent = w => Key(acct, "row", w.Symbol.ToUpperInvariant(), w.Isin, w.Currency, Stamp(w.Date), Num(w.Amount), w.Kind.ToString());
+            var skippedWithholding = TakeNew(fileWithholding, newWithholding, seenWithholding, withholdingContent, w => IdKey(acct, w.TransactionId));
             skippedWithholding += ReconcileAcrossFormats(
-                fileWithholding, newWithholding, withholding, withholdingOrigins, origin,
+                fileWithholding, newWithholding, withholding, withholdingOrigins, explainedWithholding, origin,
                 w => Key(acct, w.Symbol.ToUpperInvariant(), w.Currency, Stamp(w.Date), w.Kind.ToString()),
+                withholdingContent,
                 w => new Totals(w.Amount, 0m, 0m),
                 w => w.BookingYear ?? w.Date.Year, w => w.Date.Date, o => o.Withholding,
-                w => $"withholding on {w.Symbol} dated {w.Date:yyyy-MM-dd}", "units", conflicts);
+                w => $"withholding on {w.Symbol} dated {w.Date:yyyy-MM-dd}",
+                w => w.Amount < 0m ? YearsUpTo(w.BookingYear ?? w.Date.Year) : new[] { w.Date.Year, w.BookingYear ?? w.Date.Year }.Distinct().OrderBy(y => y).ToList(), "units", conflicts);
             foreach (var w in newWithholding) { withholding.Add(w); withholdingOrigins[w] = origin; }
 
             var skippedActions = TakeNew(
@@ -161,10 +175,14 @@ public static class StatementMerger
 
             foreach (var conflict in conflicts)
             {
-                var conflictMessage = "'" + name + "' disagrees with the other uploaded files of account " + acct + ": " + conflict +
-                              " The rows of '" + name + "' were not added (adding them would count the operation twice); the earlier file's figures stand until the difference is explained.";
-                warnings.Add(conflictMessage);
-                diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.SourceConflict, DiagnosticSeverity.Warning, conflictMessage, name, acct, AffectsAmounts: true));
+                var conflictMessage = "'" + name + "' disagrees with the other uploaded files of account " + acct + ": " + conflict.Text +
+                    (conflict.Skipped
+                        ? " The rows of '" + name + "' were not added (adding them would count the operation twice); the earlier file's figures stand until the difference is explained."
+                        : " The earlier file's rows stand and nothing was doubled; the difference has to be explained before filing.") +
+                    " Tax years it can change: " + string.Join(", ", conflict.Years) + ".";
+                if (conflict.Years.Contains(targetYear))
+                    warnings.Add(conflictMessage);
+                diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.SourceConflict, DiagnosticSeverity.Warning, conflictMessage, name, acct, conflict.Years, AffectsAmounts: true));
             }
 
             var skippedTotal = skippedTrades + skippedDividends + skippedWithholding + skippedActions;
@@ -281,94 +299,132 @@ public static class StatementMerger
     /// and side at a time. <paramref name="fileRows"/> are all rows of the file in that scope, <paramref name="accepted"/>
     /// the ones the row-level comparison did not recognise; it is pruned in place. Two formats describe the same
     /// operations at different levels (an Activity Statement shows an order and nets the withholding rows of a
-    /// day, the Flex Query lists executions and single tax rows), so rows are matched as sets: a subset of this
-    /// file's rows whose quantity, amount and fees add up to what one other-format file, one other-format row, or
-    /// the other format's rows booked in this file's year give for the group is the same operations and is
-    /// skipped. Rows left over while another format already covers them (a file of that format for the year the
-    /// row was booked in, whose rows span the row's date) are a conflict: they are skipped so that nothing is
-    /// doubled, and the conflict is reported as blocking. Rows left over because the other format does not cover
-    /// them yet are kept. Returns how many rows were skipped.
+    /// day, the Flex Query lists executions and single tax rows), so the rows of a group are matched as sets, and
+    /// a ledger is kept of what each side has already explained: a group whose quantity, amount and fees add up
+    /// to the same on both sides is the same operations; otherwise a row of this file the row-level step
+    /// recognised has used up the other-format row of the same content, and the rows left on this side are
+    /// matched, subset against subset, with the rows left on the other side (one file's, one format's, the rows
+    /// booked in this file's year, single rows, or any subset while the group is small enough to enumerate).
+    /// Rows left over on either side while the other format already covers them (a file of that format for the
+    /// year the row was booked in, whose rows span the row's date) are a conflict: this file's leftovers are
+    /// skipped so that nothing is doubled, and the conflict is reported as blocking for the years it can change.
+    /// Rows left over because the other format does not cover them yet are kept. Returns how many rows were
+    /// skipped.
     /// </summary>
     private static int ReconcileAcrossFormats<T>(
         List<T> fileRows,
         List<T> accepted,
         List<T> existing,
         Dictionary<object, Origin> origins,
+        HashSet<object> explained,
         Origin origin,
         Func<T, string> groupKeyOf,
+        Func<T, string> contentKeyOf,
         Func<T, Totals> totalsOf,
         Func<T, int> yearOf,
         Func<T, DateTime> dateOf,
         Func<Origin, DateRange?> rangeOf,
         Func<T, string> describe,
+        Func<T, IReadOnlyList<int>> yearsAffectedOf,
         string unit,
-        List<string> conflicts) where T : class
+        List<Conflict> conflicts) where T : class
     {
-        if (accepted.Count == 0 || origin.Format == "unknown")
+        if (origin.Format == "unknown")
             return 0;
 
         // Only files of the same account can describe the same operations; another broker's file covers nothing here.
         var otherFiles = origins.Values.Where(o => o.Account == origin.Account && o.Format != origin.Format && o.Format != "unknown").Distinct().ToList();
         if (otherFiles.Count == 0)
             return 0;
+        // The other format's rows that no file of this format has explained yet.
         var others = existing
+            .Where(r => !explained.Contains(r))
             .Select(r => (Row: r, Origin: origins.TryGetValue(r, out var o) ? o : null))
             .Where(x => x.Origin is not null && x.Origin.Account == origin.Account && x.Origin.Format != origin.Format && x.Origin.Format != "unknown")
             .GroupBy(x => groupKeyOf(x.Row), StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
+        var acceptedSet = new HashSet<T>(accepted, ReferenceEqualityComparer.Instance);
         var skipped = 0;
-        foreach (var group in accepted.GroupBy(groupKeyOf, StringComparer.Ordinal).ToList())
+        // Every group of this file, including those the row-level step recognised completely: the other format
+        // may hold rows of that day this file does not explain.
+        foreach (var group in fileRows.GroupBy(groupKeyOf, StringComparer.Ordinal).ToList())
         {
+            var ours = group.ToList();
+            var remaining = ours.Where(acceptedSet.Contains).ToList();
             if (!others.TryGetValue(group.Key, out var theirs))
                 theirs = [];
+            var theirRows = theirs.Select(x => x.Row).ToList();
+            if (remaining.Count == 0 && theirRows.Count == 0)
+                continue;
 
-            // What the other format says about this group, in the shapes it can take.
-            var targets = new List<Totals>();
-            foreach (var perFile in theirs.GroupBy(x => x.Origin!.File, StringComparer.Ordinal))
-                targets.Add(Sum(perFile.Select(x => x.Row), totalsOf));
-            foreach (var perFormat in theirs.GroupBy(x => x.Origin!.Format, StringComparer.Ordinal))
+            var oursTotal = Sum(ours, totalsOf);
+            var theirsTotal = Sum(theirRows, totalsOf);
+            if (theirRows.Count > 0 && SameTotals(oursTotal, theirsTotal))
             {
-                targets.Add(Sum(perFormat.Select(x => x.Row), totalsOf));
-                var sameYear = perFormat.Where(x => origin.Year is { } y && yearOf(x.Row) == y).Select(x => x.Row).ToList();
-                if (sameYear.Count > 0)
-                    targets.Add(Sum(sameYear, totalsOf));
+                // The whole group agrees: the same operations at two levels of detail.
+                foreach (var row in remaining)
+                {
+                    accepted.Remove(row);
+                    skipped++;
+                }
+
+                foreach (var row in theirRows)
+                    explained.Add(row);
+                continue;
             }
-            targets.AddRange(theirs.Select(x => totalsOf(x.Row)));
 
-            var remaining = group.ToList();
-            while (remaining.Count > 0 && targets.Count > 0)
+            // Ledger of the other side: a row of this file the row-level step recognised used up the other-format
+            // row of the same content, which therefore cannot explain a second row of this file.
+            var theirsRemaining = theirRows.ToList();
+            foreach (var recognised in ours.Where(r => !acceptedSet.Contains(r)))
             {
+                var key = contentKeyOf(recognised);
+                var consumed = theirsRemaining.FirstOrDefault(r => contentKeyOf(r) == key);
+                if (consumed is null)
+                    continue;
+                theirsRemaining.Remove(consumed);
+                explained.Add(consumed);
+            }
+
+            while (remaining.Count > 0 && theirsRemaining.Count > 0)
+            {
+                var targets = Targets(theirs, theirsRemaining, origin, totalsOf, yearOf);
                 var match = FindSubset(remaining, totalsOf, targets);
                 if (match is null)
                     break;
-                foreach (var row in match)
+                foreach (var row in match.Value.Ours)
                 {
                     accepted.Remove(row);
                     remaining.Remove(row);
                     skipped++;
                 }
+
+                foreach (var row in match.Value.Theirs)
+                {
+                    theirsRemaining.RemoveAll(r => ReferenceEquals(r, row));
+                    explained.Add(row);
+                }
             }
 
-            if (remaining.Count == 0)
+            // What is left on either side has no explanation in the other format. When that format has been
+            // uploaded for the year the row was booked in and its rows span the row's date, it should have the
+            // row: that is a conflict. Otherwise the other format simply does not cover it yet.
+            var conflictingOurs = remaining.Where(r => otherFiles.Any(o => o.Covers(rangeOf, yearOf(r), dateOf(r)))).ToList();
+            var conflictingTheirs = conflictingOurs.Count == 0 ? theirsRemaining.Where(r => origin.Covers(rangeOf, yearOf(r), dateOf(r))).ToList() : [];
+            if (conflictingOurs.Count == 0 && conflictingTheirs.Count == 0)
                 continue;
 
-            // The other format has no explanation for these rows. When it has been uploaded for the year they were
-            // booked in and its rows span their date, it should have them: that is a conflict. Otherwise the other
-            // format simply does not cover them yet and they are new.
-            var conflicting = remaining.Where(r => otherFiles.Any(o => o.Covers(rangeOf, yearOf(r), dateOf(r)))).ToList();
-            if (conflicting.Count == 0)
-                continue;
-
-            var sample = conflicting[0];
-            var ours = Sum(fileRows.Where(r => groupKeyOf(r) == group.Key), totalsOf);
-            var theirTotals = Sum(theirs.Select(x => x.Row), totalsOf);
-            conflicts.Add(
-                $"{describe(sample)}: this file gives {Num(ours.Quantity)} {unit} for {Num(ours.Amount)} {CurrencyOf(sample)} with fees {Num(ours.Fees)}, " +
-                (theirs.Count == 0
+            var sample = conflictingOurs.Count > 0 ? conflictingOurs[0] : conflictingTheirs[0];
+            var years = conflictingOurs.Concat(conflictingTheirs).SelectMany(yearsAffectedOf).Distinct().OrderBy(y => y).ToList();
+            conflicts.Add(new Conflict(
+                $"{describe(sample)}: this file gives {Num(oursTotal.Quantity)} {unit} for {Num(oursTotal.Amount)} {CurrencyOf(sample)} with fees {Num(oursTotal.Fees)}, " +
+                (theirRows.Count == 0
                     ? "the other format, which covers that period, has no such row (it may book the same operation under another date)."
-                    : $"the other format gives {Num(theirTotals.Quantity)} for {Num(theirTotals.Amount)} {CurrencyOf(sample)} with fees {Num(theirTotals.Fees)}."));
-            foreach (var row in conflicting)
+                    : $"the other format gives {Num(theirsTotal.Quantity)} for {Num(theirsTotal.Amount)} {CurrencyOf(sample)} with fees {Num(theirsTotal.Fees)}."),
+                years,
+                Skipped: conflictingOurs.Count > 0));
+            foreach (var row in conflictingOurs)
             {
                 accepted.Remove(row);
                 skipped++;
@@ -378,27 +434,96 @@ public static class StatementMerger
         return skipped;
     }
 
+    /// <summary>A disagreement between two formats of one account: the text, the tax years it can change, and whether rows of the new file were left out because of it.</summary>
+    private sealed record Conflict(string Text, IReadOnlyList<int> Years, bool Skipped);
+
     private readonly record struct Totals(decimal Quantity, decimal Amount, decimal Fees)
     {
         public static Totals operator +(Totals x, Totals y) => new(x.Quantity + y.Quantity, x.Amount + y.Amount, x.Fees + y.Fees);
     }
 
+    /// <summary>One shape the other format's unexplained rows can take, with the rows that make it up.</summary>
+    private readonly record struct Target<T>(Totals Total, List<T> Rows);
+
     /// <summary>
-    /// A subset of <paramref name="rows"/> whose totals equal one of <paramref name="targets"/>; the whole set and
-    /// single rows are tried first, then every other subset while the group is small enough to enumerate.
+    /// What the other format's rows not yet explained add up to: per file, per format, the rows booked in this
+    /// file's year, every single row, and every subset while there are few enough rows to enumerate.
     /// </summary>
-    private static List<T>? FindSubset<T>(List<T> rows, Func<T, Totals> totalsOf, List<Totals> targets)
+    private static List<Target<T>> Targets<T>(
+        List<(T Row, Origin? Origin)> theirs,
+        List<T> theirsRemaining,
+        Origin origin,
+        Func<T, Totals> totalsOf,
+        Func<T, int> yearOf) where T : class
+    {
+        var left = theirs.Where(x => theirsRemaining.Any(r => ReferenceEquals(r, x.Row))).ToList();
+        var targets = new List<Target<T>>();
+        foreach (var perFile in left.GroupBy(x => x.Origin!.File, StringComparer.Ordinal))
+        {
+            var rows = perFile.Select(x => x.Row).ToList();
+            targets.Add(new Target<T>(Sum(rows, totalsOf), rows));
+        }
+
+        foreach (var perFormat in left.GroupBy(x => x.Origin!.Format, StringComparer.Ordinal))
+        {
+            var rows = perFormat.Select(x => x.Row).ToList();
+            targets.Add(new Target<T>(Sum(rows, totalsOf), rows));
+            var sameYear = rows.Where(r => origin.Year is { } y && yearOf(r) == y).ToList();
+            if (sameYear.Count > 0)
+                targets.Add(new Target<T>(Sum(sameYear, totalsOf), sameYear));
+        }
+
+        targets.AddRange(theirsRemaining.Select(r => new Target<T>(totalsOf(r), [r])));
+        if (theirsRemaining.Count is >= 2 and <= 12)
+        {
+            var totals = theirsRemaining.Select(totalsOf).ToList();
+            for (var mask = 1; mask < (1 << theirsRemaining.Count); mask++)
+            {
+                if ((mask & (mask - 1)) == 0)
+                    continue; // single rows are listed already
+                var sum = new Totals(0m, 0m, 0m);
+                var rows = new List<T>();
+                for (var i = 0; i < theirsRemaining.Count; i++)
+                {
+                    if ((mask & (1 << i)) == 0)
+                        continue;
+                    sum += totals[i];
+                    rows.Add(theirsRemaining[i]);
+                }
+
+                targets.Add(new Target<T>(sum, rows));
+            }
+        }
+
+        return targets;
+    }
+
+    /// <summary>
+    /// A subset of <paramref name="rows"/> whose totals equal one of <paramref name="targets"/>, with that target;
+    /// the whole set and single rows are tried first, then every other subset while the group is small enough to
+    /// enumerate.
+    /// </summary>
+    private static (List<T> Ours, List<T> Theirs)? FindSubset<T>(List<T> rows, Func<T, Totals> totalsOf, List<Target<T>> targets) where T : class
     {
         var totals = rows.Select(totalsOf).ToList();
-        bool Hits(Totals t) => targets.Any(target => SameTotals(t, target));
+        Target<T>? Hit(Totals t)
+        {
+            foreach (var target in targets)
+            {
+                if (SameTotals(t, target.Total))
+                    return target;
+            }
+
+            return null;
+        }
 
         var all = totals.Aggregate(new Totals(0m, 0m, 0m), (acc, t) => acc + t);
-        if (Hits(all))
-            return rows.ToList();
+        if (Hit(all) is { } whole)
+            return (rows.ToList(), whole.Rows);
         for (var i = 0; i < rows.Count; i++)
         {
-            if (Hits(totals[i]))
-                return [rows[i]];
+            if (Hit(totals[i]) is { } single)
+                return ([rows[i]], single.Rows);
         }
 
         if (rows.Count > 12)
@@ -412,8 +537,8 @@ public static class StatementMerger
                     sum += totals[i];
             }
 
-            if (Hits(sum))
-                return rows.Where((_, i) => (mask & (1 << i)) != 0).ToList();
+            if (Hit(sum) is { } target)
+                return (rows.Where((_, i) => (mask & (1 << i)) != 0).ToList(), target.Rows);
         }
 
         return null;

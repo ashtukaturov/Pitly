@@ -58,7 +58,9 @@ public static class EntityMapper
                 RateUnavailable = t.RateUnavailable,
                 Note = t.Note,
                 Isin = t.Isin,
-                CountryCode = t.CountryCode
+                CountryCode = t.CountryCode,
+                SettleDate = t.SettleDate,
+                RateDate = t.RateDate
             }).ToList(),
             Dividends = summary.Dividends.Select(d => new DividendEntity
             {

@@ -50,16 +50,21 @@ internal sealed class IbStatement
         return this;
     }
 
-    public IbStatement Dividend(string symbol, string isin, string date, decimal amount, string currency = "USD")
+    /// <param name="perShare">The amount per share IB prints in the text of every row of one distribution.</param>
+    public IbStatement Dividend(string symbol, string isin, string date, decimal amount, string currency = "USD", string perShare = "0.25")
     {
-        _dividends.Add($"Dividends,Data,{currency},{date},{symbol}({isin}) Cash Dividend {currency} 0.25 per Share (Ordinary Dividend),{N(amount)}");
+        _dividends.Add($"Dividends,Data,{currency},{date},{symbol}({isin}) Cash Dividend {currency} {perShare} per Share (Ordinary Dividend),{N(amount)}");
         return this;
     }
 
-    /// <summary>Tax withheld on a dividend; a negative <paramref name="withheld"/> is a refund booked later.</summary>
-    public IbStatement Withholding(string symbol, string isin, string date, decimal withheld, string currency = "USD")
+    /// <summary>
+    /// Tax withheld on a dividend; a negative <paramref name="withheld"/> is a refund booked later. IB repeats the
+    /// text of the distribution (<paramref name="perShare"/>) on the tax row; <paramref name="description"/>
+    /// replaces the whole text for rows that do not follow that pattern.
+    /// </summary>
+    public IbStatement Withholding(string symbol, string isin, string date, decimal withheld, string currency = "USD", string perShare = "0.25", string? description = null)
     {
-        _withholding.Add($"Withholding Tax,Data,{currency},{date},{symbol}({isin}) Cash Dividend {currency} 0.25 per Share - US Tax,{N(-withheld)},");
+        _withholding.Add($"Withholding Tax,Data,{currency},{date},{description ?? $"{symbol}({isin}) Cash Dividend {currency} {perShare} per Share - US Tax"},{N(-withheld)},");
         return this;
     }
 

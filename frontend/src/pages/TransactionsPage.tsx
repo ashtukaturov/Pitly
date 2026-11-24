@@ -185,6 +185,9 @@ function Row({ trade }: { trade: TradeResult }) {
     <tr className={`border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors ${trade.rateUnavailable ? 'bg-amber-500/5' : ''}`}>
       <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap" title={trade.rateUnavailable ? t('transactions.rateUnavailable') : undefined}>
         {formatDate(trade.dateTime)}
+        {trade.settleDate && trade.settleDate.slice(0, 10) !== trade.dateTime.slice(0, 10) && (
+          <span className="block text-xs text-slate-500 mt-0.5">{t('transactions.settles', { date: formatDate(trade.settleDate) })}</span>
+        )}
       </td>
       <td className="px-3 py-2.5 text-white font-medium">
         {trade.symbol}
@@ -203,7 +206,12 @@ function Row({ trade }: { trade: TradeResult }) {
       <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{trade.quantity}</td>
       <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{formatUsd(trade.priceOriginal)}</td>
       <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-300">{isSell ? formatUsd(trade.proceedsOriginal) : '—'}</td>
-      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-400">{formatRate(trade.exchangeRate)}</td>
+      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-400 whitespace-nowrap">
+        {formatRate(trade.exchangeRate)}
+        {trade.rateDate && (
+          <span className="block text-xs font-sans text-slate-500 mt-0.5">{t('transactions.rateOf', { date: formatDate(trade.rateDate) })}</span>
+        )}
+      </td>
       <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{isSell ? formatPln(trade.proceedsPln) : '—'}</td>
       <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-400">{formatPln(trade.costPln)}</td>
       <td className={`px-3 py-2.5 text-right font-mono tabular-nums ${isSell ? numColor(trade.gainLossPln) : 'text-slate-600'}`}>

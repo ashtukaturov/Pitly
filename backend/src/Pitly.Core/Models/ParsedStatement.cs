@@ -80,7 +80,10 @@ public record RawDividend(
     // Set when the legal classification of the income is not established by the statement: income from lending
     // out shares (IB "SYEP"), a payment in lieu of a dividend. Such income is in the amounts (as the Kind says) and
     // carries a blocking finding until the user confirms the classification
-    string? ClassificationNote = null);
+    string? ClassificationNote = null,
+    // The broker's text of the distribution this payment belongs to ("USD 0.31 PER SHARE", see
+    // DistributionReference); a correction of the same distribution booked on another day repeats it
+    string? Distribution = null);
 
 /// <summary>
 /// One withholding event as the statement reports it. A positive <see cref="Amount"/> is tax withheld, a
@@ -113,7 +116,11 @@ public record RawWithholdingTax(
     // Day the row entered the broker's reports (IB Flex "ReportDate"). A correction dated back to the payment is
     // reported on the day it was made, often in the next year; this date is evidence of a late correction, not the
     // day the money moved, so it never sets the exchange rate
-    DateTime? ReportDate = null)
+    DateTime? ReportDate = null,
+    // The broker's text of the distribution the event belongs to ("USD 0.31 PER SHARE", see DistributionReference):
+    // the only link an Activity Statement gives between a correction booked under its own day and the payment of
+    // another day it corrects
+    string? Distribution = null)
 {
     /// <summary>The day whose exchange rate values the event (art. 11a ust. 3: the day the tax was paid or refunded).</summary>
     public DateTime EffectiveDate => BookingDate ?? Date;
@@ -141,7 +148,7 @@ public record RawWithholdingTax(
             if (ReportDate?.Year == year && BookingDate?.Year != year) return $"report date {ReportDate:yyyy-MM-dd}";
             if (SettleDate?.Year == year && BookingDate?.Year != year) return $"settlement date {SettleDate:yyyy-MM-dd}";
             if (BookingDate?.Year == year) return $"booking date {BookingDate:yyyy-MM-dd}";
-            return $"the {year} statement it was read from";
+            return $"source statement ({year}, the statement it was read from)";
         }
     }
 }

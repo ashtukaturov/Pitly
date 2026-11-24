@@ -21,4 +21,7 @@ public class TradeResultEntity
     public string? Isin { get; set; }
     // Source country named by the statement (generic CSV); null when the country comes from the ISIN
     public string? CountryCode { get; set; }
+    // Audit trail of the dates: the settlement day the statement gave and the day of the NBP table used
+    public DateTime? SettleDate { get; set; }
+    public DateTime? RateDate { get; set; }
 }

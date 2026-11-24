@@ -6,8 +6,12 @@ namespace Pitly.Core.Tax;
 
 public interface ICapitalGainsTaxCalculator
 {
-    /// <summary>Computes FIFO results; when <paramref name="warnings"/> is given, consistency checks are appended to it.</summary>
-    Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null);
+    /// <summary>
+    /// Computes FIFO results; when <paramref name="warnings"/> is given, consistency checks are appended to it, and
+    /// when <paramref name="diagnostics"/> is given, findings about single trades (a sale whose settlement falls
+    /// in the next year) are appended to it.
+    /// </summary>
+    Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null, List<TaxDiagnostic>? diagnostics = null);
 }
 
 public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
@@ -33,6 +37,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         // Lot key -> last symbol seen for it, for messages
         public Dictionary<string, string> KeySymbols { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<string>? Warnings { get; init; }
+        public List<TaxDiagnostic>? Diagnostics { get; init; }
         public bool OpeningPositionsChecked { get; set; }
         // Text such as " on account U111" appended to messages when the upload spans several accounts
         public string AccountSuffix { get; init; } = string.Empty;
@@ -48,7 +53,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
     /// another, and a split or rename reported by both statements changes each position exactly once. The accounts
     /// are calculated one after another and their results are combined afterwards.
     /// </summary>
-    public async Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null)
+    public async Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null, List<TaxDiagnostic>? diagnostics = null)
     {
         var carryIns = statement.CarryInPositions ?? [];
         var actions = statement.CorporateActions ?? [];
@@ -60,7 +65,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
             .ToList();
 
         if (accounts.Count <= 1)
-            return await CalculateAccountAsync(statement.Trades, actions, carryIns, taxPeriod, warnings, accountSuffix: string.Empty);
+            return await CalculateAccountAsync(statement.Trades, actions, carryIns, taxPeriod, warnings, diagnostics, accountSuffix: string.Empty);
 
         var results = new List<TradeResult>();
         foreach (var account in accounts)
@@ -71,6 +76,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 carryIns.Where(p => SameAccount(p.AccountId, account)).ToList(),
                 taxPeriod,
                 warnings,
+                diagnostics,
                 accountSuffix: account.Length == 0 ? " on the account without a number" : " on account " + account));
         }
 
@@ -89,12 +95,14 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         IReadOnlyList<CarryInPosition> carryIns,
         TaxPeriod taxPeriod,
         List<string>? warnings,
+        List<TaxDiagnostic>? diagnostics,
         string accountSuffix)
     {
         var ctx = new Context
         {
             TaxPeriod = taxPeriod,
             Warnings = warnings,
+            Diagnostics = diagnostics,
             AccountSuffix = accountSuffix,
             CarryInByKey = carryIns
                 .Where(p => p.Year == taxPeriod.Year)
@@ -139,7 +147,11 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
 
     private async Task ProcessTradeAsync(Trade trade, Context ctx, string? note)
     {
-        var rate = await _rateService.GetRateAsync(trade.Currency, trade.DateTime);
+        // The trade date sets the tax year and the rate (the NBP table of the last business day before it, art.
+        // 11a ust. 1-2); the settlement date, where the statement gives one, travels with the row for the audit
+        // trail and the year-end check. See DatePolicy.
+        var quote = await _rateService.GetQuoteAsync(trade.Currency, trade.DateTime);
+        var rate = quote.Rate;
         var lotKey = ResolveAlias(ctx, GetLotKey(trade));
         ctx.KeySymbols[lotKey] = trade.Symbol;
         var lots = GetOrCreateLots(ctx.BuyLots, lotKey);
@@ -170,11 +182,16 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                     GainLossPln: 0,
                     Note: note,
                     Isin: trade.Isin,
-                    CountryCode: trade.CountryCode));
+                    CountryCode: trade.CountryCode,
+                    SettleDate: trade.SettleDate,
+                    RateDate: quote.EffectiveDate));
             }
 
             return;
         }
+
+        if (note is null)
+            CheckRecognitionYear(trade, ctx);
 
         // Przychod (poz. 22) is the gross sale value; the sell commission is a koszt uzyskania
         // przychodu (art. 22 ust. 1 / art. 23 ust. 1 pkt 38 ustawy o PIT) and belongs in poz. 23.
@@ -229,8 +246,47 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
                 GainLossPln: gainLoss,
                 Note: note,
                 Isin: trade.Isin,
-                CountryCode: trade.CountryCode));
+                CountryCode: trade.CountryCode,
+                SettleDate: trade.SettleDate,
+                RateDate: quote.EffectiveDate));
         }
+    }
+
+    /// <summary>
+    /// A sale executed in one year that settles in the next belongs to the first year by its trade date and to the
+    /// second by the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT read with art. 7 ust. 2 ustawy o
+    /// obrocie instrumentami finansowymi). Pitly counts it in the trade year and does not decide the question:
+    /// the sale is reported for both years and blocks filing until the user confirms the year. Without a
+    /// settlement date in the statement, a sale in the last days of December may settle after the year end under
+    /// T+1 or T+2 and is reported the same way.
+    /// </summary>
+    private static void CheckRecognitionYear(Trade trade, Context ctx)
+    {
+        if (ctx.Diagnostics is null)
+            return;
+        var tradeYear = trade.DateTime.Year;
+        var quantity = trade.Quantity.ToString("G29", CultureInfo.InvariantCulture);
+        if (trade.SettleDate is { } settle)
+        {
+            if (settle.Year == tradeYear || (ctx.TaxPeriod.Year != tradeYear && ctx.TaxPeriod.Year != settle.Year))
+                return;
+            ctx.Diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.RecognitionDate, DiagnosticSeverity.Warning,
+                $"Sale of {quantity} {trade.Symbol} executed on {trade.DateTime:yyyy-MM-dd}{ctx.AccountSuffix} settles on {settle:yyyy-MM-dd}: " +
+                $"Pitly counts it in {tradeYear} (the trade date) and converts it at the rate of the day before that date. " +
+                $"Read as the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT: the entry on the securities account) it belongs to {settle.Year}. " +
+                "Pitly does not decide between the two readings; confirm the year before filing either return.",
+                AccountId: trade.AccountId, AffectedYears: new[] { tradeYear, settle.Year }.OrderBy(y => y).ToList(), AffectsAmounts: true));
+            return;
+        }
+
+        if (trade.DateTime.Month != 12 || trade.DateTime.Day < 29 || (ctx.TaxPeriod.Year != tradeYear && ctx.TaxPeriod.Year != tradeYear + 1))
+            return;
+        ctx.Diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.RecognitionDate, DiagnosticSeverity.Warning,
+            $"Sale of {quantity} {trade.Symbol} executed on {trade.DateTime:yyyy-MM-dd}{ctx.AccountSuffix}: the statement gives no settlement date, " +
+            $"and a sale in the last days of December settles in {tradeYear + 1} under T+1 or T+2. Pitly counts it in {tradeYear} (the trade date); " +
+            $"read as the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT) it may belong to {tradeYear + 1}. " +
+            "Upload the Flex Query of the account (its rows carry the settlement date) or confirm the year before filing either return.",
+            AccountId: trade.AccountId, AffectedYears: [tradeYear, tradeYear + 1], AffectsAmounts: true));
     }
 
     private async Task ApplyCorporateActionAsync(CorporateAction action, Context ctx)

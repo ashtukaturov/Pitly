@@ -249,6 +249,8 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
         var isin = Blank(row.Get("ISIN"));
         if (isin is not null && symbol.Length > 0)
             data.SymbolToIsin[symbol] = isin;
+        // The settlement day travels with the trade for the audit trail; the trade date sets the year and the rate.
+        DateTime? settleDate = TryParseFlexDateTime(row.Get("SettleDateTarget"), out var settle) ? settle.Date : null;
 
         data.Trades.Add(new Trade(
             Symbol: symbol,
@@ -263,7 +265,8 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
             Type: type,
             Isin: isin,
             TransactionId: Blank(row.Get("TradeID")) ?? Blank(row.Get("TransactionID")),
-            CountryCode: Blank(row.Get("IssuerCountryCode"))?.ToUpperInvariant()));
+            CountryCode: Blank(row.Get("IssuerCountryCode"))?.ToUpperInvariant(),
+            SettleDate: settleDate));
     }
 
     private void ParseCashTransaction(Row row, AccountData data)
@@ -324,7 +327,8 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
                     ActionId: actionId,
                     BookingDate: bookingDate,
                     RawType: type,
-                    RawDescription: description));
+                    RawDescription: description,
+                    Distribution: DistributionReference.Parse(description)));
                 return;
             }
             case "Broker Interest Received":
@@ -368,10 +372,12 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
                 IncomeKind kind;
                 string eventSymbol;
                 string? reference = null;
+                string? distribution = null;
                 if (isin is not null || symbol is not null)
                 {
                     kind = description.Contains("Payment in Lieu", StringComparison.OrdinalIgnoreCase) ? IncomeKind.PaymentInLieu : IncomeKind.Dividend;
                     eventSymbol = symbol ?? SymbolFromDescription(description) ?? isin!;
+                    distribution = DistributionReference.Parse(description);
                 }
                 else if (InterestRegex().IsMatch(description))
                 {
@@ -400,7 +406,8 @@ public sealed partial class InteractiveBrokersFlexParser : IStatementParser
                     RawType: type,
                     RawDescription: description,
                     SettleDate: settleDate,
-                    ReportDate: reportDate));
+                    ReportDate: reportDate,
+                    Distribution: distribution));
                 return;
             }
             case "Broker Interest Paid":

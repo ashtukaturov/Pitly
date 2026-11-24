@@ -32,8 +32,9 @@ public class TaxCalculator : ITaxCalculator
         // in doubt (history that does not add up, withholding that could not be attributed) and is therefore kept
         // apart from the informational statement warnings: it is repeated on PIT-38 and in the printed report.
         var capitalGainWarnings = new List<string>();
+        var tradeDiagnostics = new List<TaxDiagnostic>();
         var dividendDiagnostics = new List<TaxDiagnostic>();
-        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, capitalGainWarnings);
+        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, capitalGainWarnings, tradeDiagnostics);
         var dividendsTask = _dividendTaxCalculator.CalculateAsync(
             statement.Dividends, statement.WithholdingTaxes, taxPeriod, creditMethod, dividendDiagnostics);
         await Task.WhenAll(tradeResultsTask, dividendsTask);
@@ -47,8 +48,12 @@ public class TaxCalculator : ITaxCalculator
             diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.PositionCheck, DiagnosticSeverity.Warning, warning,
                 AffectedYears: [taxPeriod.Year], AffectsAmounts: true));
         }
+        diagnostics.AddRange(tradeDiagnostics);
         diagnostics.AddRange(dividendDiagnostics);
-        diagnostics.AddRange(statement.Diagnostics ?? []);
+        // Findings of the parsers and the merger that name the years they can change (a conflict on a purchase of
+        // a later year, an unsupported row of another year) are shown only for those years; one without years is
+        // shown for every year.
+        diagnostics.AddRange((statement.Diagnostics ?? []).Where(d => d.AffectedYears is not { Count: > 0 } years || years.Contains(taxPeriod.Year)));
         foreach (var warning in (statement.Warnings ?? []).Where(w => w.StartsWith(StatementMerger.AccountCheckPrefix, StringComparison.Ordinal)))
         {
             if (diagnostics.All(d => d.Message != warning))

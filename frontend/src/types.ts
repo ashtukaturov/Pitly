@@ -18,6 +18,10 @@ export interface TradeResult {
   isin?: string | null;
   /** Source country named by the statement (generic CSV); null when PIT/ZG uses the ISIN prefix. */
   countryCode?: string | null;
+  /** Settlement day the statement gives (IB Flex, generic CSV); null when it gives none. The trade date sets the year. */
+  settleDate?: string | null;
+  /** Day of the NBP table whose mid rate converted the row (the last business day before the trade date); null when unknown. */
+  rateDate?: string | null;
 }
 
 /** Flat-tax (art. 30a) income stream. All are taxed at 19% and reported in the same PIT-38 field. */
@@ -92,6 +96,15 @@ export interface RoundingPolicy {
   interestRule: string;
   mixedRule: string;
   mixedRuleIsAssumption: boolean;
+  sources: string[];
+}
+
+/** The dates a trade is recognised and converted on, with their version and sources (backend DatePolicy). */
+export interface DatePolicy {
+  version: string;
+  recognitionRule: string;
+  rateRule: string;
+  recognitionRuleIsInterpretation: boolean;
   sources: string[];
 }
 
@@ -228,6 +241,7 @@ export interface Pit38Fields {
   unresolvedAmountPln: number;
   roundingPolicy: RoundingPolicy | null;
   creditMethod: CreditMethod;
+  datePolicy?: DatePolicy | null;
 }
 
 /** Field numbers (poz.) of one verified PIT-38 form version; mirrors backend Pit38FormLayout. */

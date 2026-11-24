@@ -1,3 +1,4 @@
+using System.Globalization;
 using Pitly.Core.Tax;
 
 namespace Pitly.Core.Models;
@@ -85,7 +86,10 @@ public record Pit38Fields(
     RoundingPolicy? RoundingPolicy = null,
 
     // How the foreign tax credit was limited
-    CreditMethod CreditMethod = CreditMethod.TreatyCap)
+    CreditMethod CreditMethod = CreditMethod.TreatyCap,
+
+    // The dates a trade is recognised and converted on, with their version and sources
+    DatePolicy? DatePolicy = null)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
@@ -181,6 +185,25 @@ public record Pit38Fields(
                     : DiagnosticCodes.UnmatchedWithholding,
                 DiagnosticSeverity.Warning, w, AffectsAmounts: true)));
         }
+        // Interest rounded per payment can give another figure than the same interest rounded once on the yearly
+        // total. Art. 63 § 1a fixes the direction (up to the grosz), not the level at which a self-assessed return
+        // aggregates the base; the level is Pitly's policy, so the result names what the other reading would give.
+        // A difference between two calculators is then seen for what it is, and agreement with one proves nothing.
+        if (interestPayments.Count > 1)
+        {
+            var yearlyTax = RoundToGroszUp(RoundToGroszUp(interestPln) * TaxConstants.TaxRate);
+            if (yearlyTax != interestTax)
+            {
+                diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.InterestRoundingLevel, DiagnosticSeverity.Warning,
+                    $"The flat tax on interest was rounded per payment ({interestPayments.Count} payments, the base and the tax of each rounded up to the grosz): {Grosz(interestTax)} PLN. " +
+                    $"Rounded once on the yearly total of {Exact(interestPln)} PLN it would be {Grosz(yearlyTax)} PLN, {Grosz(interestTax - yearlyTax)} PLN less. " +
+                    "Art. 63 § 1a Ordynacji podatkowej fixes the direction of rounding, not the level at which a self-assessed return aggregates the base; " +
+                    $"Pitly applies it per payment (each payment is a separate base, as a Polish payer withholds) and records the choice as rounding policy {RoundingPolicy.Current.Version}. " +
+                    "Agreement with another calculator proves neither reading.",
+                    AffectedYears: [summary.Year]));
+            }
+        }
+
         var dataWarnings = diagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning).Select(d => d.Message).Distinct().ToList();
         foreach (var w in summary.ResultWarnings ?? [])
         {
@@ -216,8 +239,13 @@ public record Pit38Fields(
             ReadyToFile: diagnostics.All(d => !d.BlocksFiling),
             UnresolvedAmountPln: diagnostics.Where(d => d.BlocksFiling).Sum(d => d.UnresolvedAmountPln ?? 0m),
             RoundingPolicy: RoundingPolicy.Current,
-            CreditMethod: summary.CreditMethod);
+            CreditMethod: summary.CreditMethod,
+            DatePolicy: DatePolicy.Current);
     }
+
+    private static string Grosz(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string Exact(decimal value) => value.ToString("0.00####", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Rounds to full PLN per art. 63 § 1 Ordynacji podatkowej:

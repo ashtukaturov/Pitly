@@ -26,32 +26,34 @@ internal sealed class IbFlexCsv
     private static string NextId() => Interlocked.Increment(ref _nextId).ToString(CultureInfo.InvariantCulture);
 
     /// <param name="dateTime">"yyyyMMdd;HHmmss" as the export writes it.</param>
-    public IbFlexCsv Buy(string account, string symbol, string isin, string dateTime, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? tradeId = null)
-        => Trade(account, symbol, isin, dateTime, quantity, price, commission, currency, tradeId, "BUY");
+    /// <param name="settleDate">"yyyyMMdd" written to SettleDateTarget; the trade day when not given.</param>
+    public IbFlexCsv Buy(string account, string symbol, string isin, string dateTime, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? tradeId = null, string? settleDate = null)
+        => Trade(account, symbol, isin, dateTime, quantity, price, commission, currency, tradeId, "BUY", settleDate);
 
-    public IbFlexCsv Sell(string account, string symbol, string isin, string dateTime, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? tradeId = null)
-        => Trade(account, symbol, isin, dateTime, -quantity, price, commission, currency, tradeId, "SELL");
+    public IbFlexCsv Sell(string account, string symbol, string isin, string dateTime, decimal quantity, decimal price, decimal commission = 0m, string currency = "USD", string? tradeId = null, string? settleDate = null)
+        => Trade(account, symbol, isin, dateTime, -quantity, price, commission, currency, tradeId, "SELL", settleDate);
 
-    private IbFlexCsv Trade(string account, string symbol, string isin, string dateTime, decimal signedQuantity, decimal price, decimal commission, string currency, string? tradeId, string side)
+    private IbFlexCsv Trade(string account, string symbol, string isin, string dateTime, decimal signedQuantity, decimal price, decimal commission, string currency, string? tradeId, string side, string? settleDate)
     {
         var day = dateTime[..8];
         var proceeds = -signedQuantity * price;
-        _trades.Add(Q(account, currency, "STK", symbol, isin, isin[..2], tradeId ?? NextId(), dateTime, day, day, N(signedQuantity), N(price), N(proceeds), "0", N(-commission), currency, side, NextId(), "EXECUTION", "0"));
+        _trades.Add(Q(account, currency, "STK", symbol, isin, isin[..2], tradeId ?? NextId(), dateTime, day, settleDate ?? day, N(signedQuantity), N(price), N(proceeds), "0", N(-commission), currency, side, NextId(), "EXECUTION", "0"));
         return this;
     }
 
-    public IbFlexCsv Dividend(string account, string symbol, string isin, string date, decimal amount, string actionId, string currency = "USD", string? transactionId = null)
+    /// <param name="perShare">The amount per share IB prints in the text of every row of one distribution.</param>
+    public IbFlexCsv Dividend(string account, string symbol, string isin, string date, decimal amount, string actionId, string currency = "USD", string? transactionId = null, string perShare = "0.25")
     {
         _cash.Add(Q(account, currency, "STK", symbol, isin, isin[..2], date + ";202000", date, date, N(amount), "Dividends", transactionId ?? NextId(), actionId,
-            $"{symbol}({isin}) CASH DIVIDEND {currency} 0.25 PER SHARE (Ordinary Dividend)", "DETAIL"));
+            $"{symbol}({isin}) CASH DIVIDEND {currency} {perShare} PER SHARE (Ordinary Dividend)", "DETAIL"));
         return this;
     }
 
     /// <summary>Tax on a dividend; a negative <paramref name="withheld"/> is a refund. Flex writes withheld tax as a negative amount.</summary>
-    public IbFlexCsv Withholding(string account, string symbol, string isin, string date, decimal withheld, string actionId, string currency = "USD", string? transactionId = null)
+    public IbFlexCsv Withholding(string account, string symbol, string isin, string date, decimal withheld, string actionId, string currency = "USD", string? transactionId = null, string perShare = "0.25")
     {
         _cash.Add(Q(account, currency, "STK", symbol, isin, isin[..2], date + ";202000", date, date, N(-withheld), "Withholding Tax", transactionId ?? NextId(), actionId,
-            $"{symbol}({isin}) CASH DIVIDEND {currency} 0.25 PER SHARE - {isin[..2]} TAX", "DETAIL"));
+            $"{symbol}({isin}) CASH DIVIDEND {currency} {perShare} PER SHARE - {isin[..2]} TAX", "DETAIL"));
         return this;
     }
 
