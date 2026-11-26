@@ -10,6 +10,7 @@ public interface IImportService
     /// one account, files with different labels are separate accounts.
     /// </param>
     /// <param name="creditMethod">How the foreign tax credit is limited; the treaty cap unless the user asks otherwise.</param>
+    /// <param name="decisions">The user's answers to the questions no source settles; <see cref="TaxDecisions.Default"/> when null.</param>
     Task<ImportResult> ImportStatementsAsync(
         IReadOnlyList<Stream> fileStreams,
         DateTime? residencyStartDate = null,
@@ -17,7 +18,8 @@ public interface IImportService
         int? taxYear = null,
         IReadOnlyList<string>? fileNames = null,
         IReadOnlyDictionary<string, string>? accountLabels = null,
-        CreditMethod creditMethod = CreditMethod.TreatyCap);
+        CreditMethod creditMethod = CreditMethod.TreatyCap,
+        TaxDecisions? decisions = null);
 }
 
 /// <param name="AvailableYears">Years found anywhere in the upload; any of them can be requested as the tax year.</param>

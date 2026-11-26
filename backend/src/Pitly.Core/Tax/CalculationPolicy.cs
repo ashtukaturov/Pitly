@@ -57,42 +57,65 @@ public sealed record RoundingPolicy(
 }
 
 /// <summary>
-/// The dates a trade is recognised and converted on, and their version. The rule is one reading of the law: art.
-/// 17 ust. 1ab pkt 1 ustawy o PIT ties the income from a sale of securities to the transfer of ownership, which
-/// for dematerialised securities is the entry on the securities account (settlement), while the day of the
-/// transaction is the date brokers' statements and most practice use. The two readings differ only at the year
-/// end and by the rate of a day or two; Pitly uses the trade date, keeps the settlement date on every row that
-/// has one, and reports a sale whose settlement falls in the next year for both years instead of deciding it.
+/// The dates a trade is recognised and converted on, and their version. The date is the user's decision
+/// (<see cref="TradeDateBasis"/>), the settlement date by default: art. 17 ust. 1ab pkt 1 ustawy o PIT ties the
+/// income from a sale of securities to the transfer of ownership, which for dematerialised securities is the entry
+/// on the securities account (art. 7 ust. 2 ustawy o obrocie instrumentami finansowymi), and the cost of a purchase
+/// is incurred when it is paid for (art. 11a ust. 2: "dzień poniesienia kosztu"). The trade date is the
+/// alternative the user may choose. Either way the rule is applied to every year alike, so that a trade at a year
+/// end is counted exactly once.
 /// </summary>
 public sealed record DatePolicy(
     string Version,
     string RecognitionRule,
     string RateRule,
     bool RecognitionRuleIsInterpretation,
-    IReadOnlyList<string> Sources)
+    IReadOnlyList<string> Sources,
+    TradeDateBasis Basis = TradeDateBasis.SettlementDate)
 {
-    public static readonly DatePolicy Current = new(
-        Version: "2025.3",
+    private static readonly IReadOnlyList<string> DateSources =
+    [
+        "Ustawa o PIT art. 11a ust. 1-2, art. 17 ust. 1ab pkt 1, art. 30b",
+        "Ustawa o obrocie instrumentami finansowymi art. 7 ust. 2 (dematerialised securities pass with the entry on the securities account)",
+        "Broszura informacyjna do zeznania PIT-38 za 2025 r.: https://podatki.gov.pl/media/g5ebnm2e/broszura-do-pit-38-za-2025-r.pdf"
+    ];
+
+    public static readonly DatePolicy Settlement = new(
+        Version: "2025.4",
         RecognitionRule:
-            "A sale is counted in the year of its trade (execution) date; a purchase is costed as of its trade date. The settlement date, where the statement gives one, " +
-            "is kept on the row for the audit trail. A sale executed in one year that settles in the next (or, without a settlement date, is executed in the last days of December) " +
-            "is reported for both years and blocks filing until the year is confirmed: art. 17 ust. 1ab pkt 1 ties the income to the transfer of ownership, " +
-            "which for dematerialised securities is the entry on the securities account (settlement), and Pitly does not decide between that reading and the trade date.",
+            "A sale is counted in the year of its settlement date, the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT: for dematerialised securities the entry on the securities account), " +
+            "and a purchase is costed as of its settlement date, the day it is paid for. This is the user's decision (the default). " +
+            "A statement that gives no settlement date (the Activity Statement, Trading 212) is dated by the trade date and the result says so; " +
+            "a sale in the last days of December without a settlement date blocks filing, because the year it settles in is not known.",
+        RateRule:
+            "Proceeds, costs and commissions are converted at the NBP mid rate of the last business day before the settlement date (art. 11a ust. 1 and 2), " +
+            "or before the trade date where the statement gives no settlement date; the day of the NBP table actually used is kept on each row.",
+        RecognitionRuleIsInterpretation: true,
+        Sources: DateSources,
+        Basis: TradeDateBasis.SettlementDate);
+
+    public static readonly DatePolicy Trade = new(
+        Version: "2025.4",
+        RecognitionRule:
+            "A sale is counted in the year of its trade (execution) date and a purchase is costed as of its trade date. This is the user's decision; " +
+            "the default reading ties the income to the settlement date (art. 17 ust. 1ab pkt 1 ustawy o PIT). The settlement date, where the statement gives one, is kept on the row, " +
+            "and a sale that settles in the next year is counted in the trade year with a note naming the other reading.",
         RateRule:
             "Proceeds, costs and commissions are converted at the NBP mid rate of the last business day before the trade date (art. 11a ust. 1 and 2); " +
             "the day of the NBP table actually used is kept on each row.",
         RecognitionRuleIsInterpretation: true,
-        Sources:
-        [
-            "Ustawa o PIT art. 11a ust. 1-2, art. 17 ust. 1ab pkt 1, art. 30b",
-            "Ustawa o obrocie instrumentami finansowymi art. 7 ust. 2 (dematerialised securities pass with the entry on the securities account)",
-            "Broszura informacyjna do zeznania PIT-38 za 2025 r.: https://podatki.gov.pl/media/g5ebnm2e/broszura-do-pit-38-za-2025-r.pdf"
-        ]);
+        Sources: DateSources,
+        Basis: TradeDateBasis.TradeDate);
+
+    /// <summary>The policy of a new calculation without an explicit decision.</summary>
+    public static DatePolicy Current => Settlement;
+
+    public static DatePolicy For(TradeDateBasis basis) => basis == TradeDateBasis.TradeDate ? Trade : Settlement;
 }
 
 /// <summary>Versions of the rules a stored session was computed with, so that an old result can be told apart from a new one.</summary>
 public static class RuleVersions
 {
     /// <summary>Changes whenever the matching of withholding, the rounding, the credit or the date rules change.</summary>
-    public const string Rules = "2025.3";
+    public const string Rules = "2025.4";
 }

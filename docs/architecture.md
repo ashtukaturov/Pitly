@@ -65,12 +65,19 @@ the same files again with different options and replaces the result.
 - `TaxPeriod`: the tax year and the taxable window inside it (the whole year, or from the residency start date).
 - `TaxSummary`: totals in PLN at full precision, the per-row results, `Warnings` (everything worth telling
   the user), `ResultWarnings` (the subset that puts the amounts themselves in doubt), `Diagnostics`,
-  `WithholdingEvents`, the `CreditMethod` and the `SourceFiles` (name, SHA-256, broker, account, year, parser).
+  `WithholdingEvents`, the `CreditMethod`, the `SourceFiles` (name, SHA-256, broker, account, year, parser), the
+  user's `Decisions` and the `OtherSourcesIncome` they moved out of PIT-38.
 - `Pit38Fields`: the declared values (rounded here and nowhere earlier), the `Form` layout for the year (or
   null), `DataWarnings`, `Diagnostics`, `ReadyToFile`, `UnresolvedAmountPln`, `RoundingPolicy`,
-  `CreditMethod`, `NeedsReimport`.
+  `CreditMethod`, `DatePolicy`, `Decisions`, `OtherSourcesIncome` with its totals, `NeedsReimport`.
 - `CalculationPolicy.cs`: `CreditMethod` (treaty cap by default, statutory cap for comparison),
-  `RoundingPolicy.Current` (version, the three rules, which one is an assumption, sources), `RuleVersions`.
+  `RoundingPolicy.Current` (version, the three rules, which one is an assumption, sources), `DatePolicy.For(basis)`
+  (settlement or trade date), `RuleVersions`.
+- `TaxDecisions.cs`: the user's answers to the questions no source settles: `DateBasis` (settlement date by
+  default), `SecuritiesLending`, `PaymentsInLieu` (unconfirmed until answered) and `CrossYearRefunds`. The import
+  reads them from the optional `decisions` form field (JSON, `TaxDecisionsJson`; an unknown value is a 400). A
+  finding that an answer resolves names it in `TaxDiagnostic.Decision`, so the UI shows the question next to it.
+  `TaxDecisions.Legacy` (trade date, nothing confirmed) is what a session stored before decisions existed used.
 - `Pit38FormLayout`: field numbers of each verified form version, keyed by tax year.
 
 ## Accounts and merging (`Parsing/StatementMerger.cs`)
@@ -169,6 +176,7 @@ Form fields of `POST /api/import`:
 | `residencyStartDate` | Optional date; limits the taxable window when it falls inside the tax year. |
 | `priorYearLosses` | Optional JSON array of earlier losses. |
 | `accountLabels` | Optional JSON object: file name to account label, for files without an account number. |
+| `decisions` | Optional JSON object, the user's answers: `dateBasis` (`SettlementDate`, `TradeDate`), `securitiesLending` (`Unconfirmed`, `Interest`, `OtherSources`), `paymentsInLieu` (`Unconfirmed`, `Dividend`, `OtherSources`), `crossYearRefunds` (`Unconfirmed`, `CorrectOriginalYear`). A missing field keeps its default; anything else is a 400. |
 
 Errors:
 
@@ -191,7 +199,8 @@ reader use the request limit; `frontend/nginx.conf` and `docker/frontend.nginx.c
 SQLite through EF Core (`AppDbContext`), file `pitly.db` next to the API, ignored by git. A session stores the
 result rows, the withholding events of its year (`WithholdingEvents` table), the findings (`DiagnosticsJson`),
 the provenance of the upload (`SourceFilesJson`: name, SHA-256, broker, account, year, parser version),
-`RulesVersion`, `FormVersion`, `CreditMethod` and the totals at full precision, never the uploaded files.
+`RulesVersion`, `FormVersion`, `CreditMethod`, the decisions (`DecisionsJson`), the income moved to PIT-36
+(`OtherSourcesIncomeJson`) and the totals at full precision, never the uploaded files.
 Decimals are stored as text. `SessionCleanupService` deletes sessions older than `SessionCleanup:TtlHours` (24
 by default).
 

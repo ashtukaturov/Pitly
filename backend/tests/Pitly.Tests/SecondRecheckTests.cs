@@ -383,10 +383,11 @@ public class SecondRecheckTests
     [Fact]
     public async Task Trades_CarryTheSettlementDateAndTheRateDateForTheAuditTrail()
     {
-        // Buy 10 at 100 USD on 2025-03-03 (settles 03-05), sell 10 at 120 USD on 2025-06-03 (settles 06-05). Both
-        // are converted at the rate of the day before the trade date (art. 11a ust. 1-2); the test rates are dated
-        // that way, so the rows show 2025-03-02 and 2025-06-02 as the rate dates and keep the settlement dates.
-        // Nothing crosses a year end, so nothing is flagged.
+        // Buy 10 at 100 USD on 2025-03-03 (settles 03-05), sell 10 at 120 USD on 2025-06-03 (settles 06-05). By the
+        // default date decision (R3: the settlement date) both are converted at the rate of the day before the
+        // settlement date (art. 11a ust. 1-2); the test rates are dated that way, so the rows show 2025-03-04 and
+        // 2025-06-04 as the rate dates and keep the settlement dates. Nothing crosses a year end, so nothing is
+        // flagged. The amounts by each date are pinned in TaxDecisionsTests.
         var flex = new IbFlexCsv()
             .Buy(Account, "SYN", Syn, "20250303;100000", 10m, 100m, settleDate: "20250305")
             .Sell(Account, "SYN", Syn, "20250603;100000", 10m, 120m, settleDate: "20250605")
@@ -400,17 +401,18 @@ public class SecondRecheckTests
         var trades = (await app.GetAsync($"/api/session/{id}/trades?pageSize=10")).Body.GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(2, trades.Count);
         Assert.Equal("2025-03-05", trades[0].GetProperty("settleDate").GetString()?[..10]);
-        Assert.Equal("2025-03-02", trades[0].GetProperty("rateDate").GetString()?[..10]);
+        Assert.Equal("2025-03-04", trades[0].GetProperty("rateDate").GetString()?[..10]);
         Assert.Equal("2025-06-05", trades[1].GetProperty("settleDate").GetString()?[..10]);
-        Assert.Equal("2025-06-02", trades[1].GetProperty("rateDate").GetString()?[..10]);
+        Assert.Equal("2025-06-04", trades[1].GetProperty("rateDate").GetString()?[..10]);
     }
 
     [Fact]
-    public async Task Sale_ThatSettlesInTheNextYearIsCountedInTheTradeYearAndBlocksBothYearsUntilConfirmed()
+    public async Task Sale_ThatSettlesInTheNextYearBelongsToTheYearOfTheDecidedDateAndIsNotedForBoth()
     {
-        // Buy 10 at 100 on 2025-03-03; sell 10 at 120 on 2025-12-30, settling 2026-01-02. Pitly counts the sale in
-        // 2025 (proceeds 4800, costs 4000, gain 800, tax 152) and says the year is not settled: RECOGNITION_DATE
-        // for 2025 and 2026, blocking in both.
+        // Buy 10 at 100 on 2025-03-03; sell 10 at 120 on 2025-12-30, settling 2026-01-02 (USD at 4). By the default
+        // decision (the settlement date) the sale belongs to 2026: proceeds 4800, costs 4000, gain 800, tax 152;
+        // 2025 has no sale. By the trade date it belongs to 2025 with the same figures and 2026 has none. Either way
+        // the year is decided, so RECOGNITION_DATE is a note for both years and neither is blocked.
         var flex = new IbFlexCsv()
             .Buy(Account, "SYN", Syn, "20250303;100000", 10m, 100m, settleDate: "20250305")
             .Sell(Account, "SYN", Syn, "20251230;100000", 10m, 120m, settleDate: "20260102")
@@ -419,18 +421,30 @@ public class SecondRecheckTests
 
         var y2025 = await app.ImportAsync([("flex.csv", flex)], taxYear: 2025);
         y2025.AssertOk();
-        Assert.Equal(4800m, y2025.Field("innePrzychody"));
-        Assert.Equal(152m, y2025.Field("podatekNalezny"));
+        Assert.Equal(0m, y2025.Field("innePrzychody"));
         var finding = Assert.Single(Of(y2025, DiagnosticCodes.RecognitionDate));
         Assert.Equal([2025, 2026], Years(finding));
-        Assert.True(finding.GetProperty("blocksFiling").GetBoolean());
-        Assert.False(Ready(y2025));
+        Assert.False(finding.GetProperty("blocksFiling").GetBoolean());
+        Assert.Equal("dateBasis", finding.GetProperty("decision").GetString());
+        Assert.True(Ready(y2025));
 
         var y2026 = await app.ImportAsync([("flex.csv", flex)], taxYear: 2026);
         y2026.AssertOk();
-        Assert.Equal(0m, y2026.Field("innePrzychody"));
+        Assert.Equal(4800m, y2026.Field("innePrzychody"));
+        Assert.Equal(4000m, y2026.Field("inneKoszty"));
+        Assert.Equal(152m, y2026.Field("podatekNalezny"));
         Assert.Single(Of(y2026, DiagnosticCodes.RecognitionDate));
-        Assert.False(Ready(y2026));
+        Assert.True(Ready(y2026));
+
+        const string byTradeDate = """{"dateBasis":"TradeDate"}""";
+        var t2025 = await app.ImportAsync([("flex.csv", flex)], taxYear: 2025, decisionsJson: byTradeDate);
+        t2025.AssertOk();
+        Assert.Equal(4800m, t2025.Field("innePrzychody"));
+        Assert.Equal(152m, t2025.Field("podatekNalezny"));
+        Assert.True(Ready(t2025));
+        var t2026 = await app.ImportAsync([("flex.csv", flex)], taxYear: 2026, decisionsJson: byTradeDate);
+        Assert.Equal(0m, t2026.Field("innePrzychody"));
+        Assert.True(Ready(t2026));
     }
 
     [Fact]
@@ -455,9 +469,11 @@ public class SecondRecheckTests
     }
 
     [Fact]
-    public void Policies_NameTheTradeDateRuleAndItsSources()
+    public void Policies_NameTheDecidedDateRuleAndItsSources()
     {
-        Assert.Contains("trade", DatePolicy.Current.RecognitionRule, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(TradeDateBasis.SettlementDate, DatePolicy.Current.Basis);
+        Assert.Contains("settlement date", DatePolicy.For(TradeDateBasis.SettlementDate).RecognitionRule);
+        Assert.Contains("trade (execution) date", DatePolicy.For(TradeDateBasis.TradeDate).RecognitionRule);
         Assert.True(DatePolicy.Current.RecognitionRuleIsInterpretation);
         Assert.Contains(DatePolicy.Current.Sources, s => s.Contains("art. 17 ust. 1ab"));
         Assert.Contains("per payment", RoundingPolicy.Current.InterestRule);

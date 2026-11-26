@@ -40,6 +40,8 @@ public static class DbSchemaUpgrader
         ("Sessions", "RulesVersion", "TEXT NULL"),
         ("Sessions", "FormVersion", "INTEGER NULL"),
         ("Sessions", "CreditMethod", "TEXT NOT NULL DEFAULT 'TreatyCap'"),
+        ("Sessions", "DecisionsJson", "TEXT NULL"),
+        ("Sessions", "OtherSourcesIncomeJson", "TEXT NULL"),
         ("TradeResults", "Note", "TEXT NULL"),
         ("TradeResults", "Isin", "TEXT NULL"),
         ("TradeResults", "CountryCode", "TEXT NULL"),

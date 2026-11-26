@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useState } from 'react';
 import { Printer, FileText, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { formatPln, formatTaxPeriod, hasCustomTaxPeriod } from '../format';
-import type { AppState, Pit38Fields } from '../types';
+import type { AppState, Pit38Fields, RecalculateOptions } from '../types';
 import EmptyState from '../components/EmptyState';
 import DiagnosticsPanel from '../components/DiagnosticsPanel';
+import DecisionsPanel, { OtherSourcesSection } from '../components/DecisionsPanel';
 import { useT, type TFunction } from '../i18n';
 import { formRefs, VERIFIED_FORM_YEARS } from '../pit38Form';
 
@@ -21,7 +22,17 @@ function usePit38T(pit38: Pit38Fields | null): TFunction {
   );
 }
 
-export default function Pit38Page({ state }: { state: AppState }) {
+export default function Pit38Page({
+  state,
+  onRecalculate,
+  switching = false,
+  error = null,
+}: {
+  state: AppState;
+  onRecalculate?: (options: RecalculateOptions) => void;
+  switching?: boolean;
+  error?: string | null;
+}) {
   const t = usePit38T(state.pit38);
   const pit38 = state.pit38;
 
@@ -63,6 +74,14 @@ export default function Pit38Page({ state }: { state: AppState }) {
       )}
 
       <DiagnosticsPanel pit38={pit38} />
+
+      <DecisionsPanel
+        pit38={pit38}
+        decisions={state.decisions}
+        busy={switching}
+        error={error}
+        onChange={onRecalculate && state.files.length > 0 ? (decisions) => onRecalculate({ decisions }) : undefined}
+      />
 
       <Section title={t('pit38.sectionC.title')}>
         <div className="overflow-x-auto">
@@ -171,6 +190,8 @@ export default function Pit38Page({ state }: { state: AppState }) {
           {t('pit38.danina.notTriggered', { amount: formatPln(pit38.podstawaObliczenia) })}
         </p>
       )}
+
+      <OtherSourcesSection pit38={pit38} />
 
       <PitZgSection pit38={pit38} />
 

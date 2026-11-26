@@ -39,6 +39,10 @@ public class SessionEntity
     public int? FormVersion { get; set; }
     // How the foreign tax credit was limited (CreditMethod name)
     public string CreditMethod { get; set; } = "TreatyCap";
+    // The user's decisions (JSON of TaxDecisions); null for sessions saved before they existed (TaxDecisions.Legacy)
+    public string? DecisionsJson { get; set; }
+    // Payments classified as income from other sources, left out of PIT-38 (JSON array of OtherSourceIncome)
+    public string? OtherSourcesIncomeJson { get; set; }
 
     public List<TradeResultEntity> TradeResults { get; set; } = [];
     public List<DividendEntity> Dividends { get; set; } = [];

@@ -45,6 +45,8 @@ public static class DiagnosticCodes
     public const string SummaryMismatch = "SUMMARY_MISMATCH";
     /// <summary>Income whose legal classification Pitly does not establish (securities lending, payments in lieu).</summary>
     public const string ClassificationUnverified = "CLASSIFICATION_UNVERIFIED";
+    /// <summary>Income whose classification the user decided (securities lending, payments in lieu); the finding says how it was declared.</summary>
+    public const string ClassificationDecided = "CLASSIFICATION_DECIDED";
     /// <summary>Two files of one account describe the same day's operations with different amounts; the second file's rows were not added.</summary>
     public const string SourceConflict = "SOURCE_CONFLICT";
     /// <summary>The issuer's country has no treaty rate on file (or cannot be told), so the foreign tax was not credited under the treaty cap.</summary>
@@ -53,6 +55,8 @@ public static class DiagnosticCodes
     public const string InterestRoundingLevel = "INTEREST_ROUNDING_LEVEL";
     /// <summary>A sale executed in one year that settles (or may settle) in the next: which year's return it belongs to is not decided by Pitly.</summary>
     public const string RecognitionDate = "RECOGNITION_DATE";
+    /// <summary>Trades dated by the settlement date whose statement gives none: they were dated and converted by the trade date.</summary>
+    public const string SettlementDateMissing = "SETTLEMENT_DATE_MISSING";
 }
 
 /// <summary>
@@ -66,6 +70,10 @@ public static class DiagnosticCodes
 /// <param name="AffectedYears">Tax years whose return the finding may change.</param>
 /// <param name="UnresolvedAmountPln">Money that is not in the declared amounts because of this finding.</param>
 /// <param name="AffectsAmounts">True when the declared amounts cannot be called final until this is resolved.</param>
+/// <param name="Decision">
+/// The user's decision (one of <c>DecisionTopics</c>) that resolves the finding or that the finding reports on, so
+/// that the UI can offer the choice next to it.
+/// </param>
 public record TaxDiagnostic(
     string Code,
     DiagnosticSeverity Severity,
@@ -74,7 +82,8 @@ public record TaxDiagnostic(
     string? AccountId = null,
     IReadOnlyList<int>? AffectedYears = null,
     decimal? UnresolvedAmountPln = null,
-    bool AffectsAmounts = false)
+    bool AffectsAmounts = false,
+    string? Decision = null)
 {
     /// <summary>A finding the user must act on before the amounts can be trusted.</summary>
     public bool BlocksFiling => AffectsAmounts && Severity >= DiagnosticSeverity.Warning;

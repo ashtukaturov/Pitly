@@ -18,18 +18,32 @@ Verify those two before quoting them.
 Each amount is converted at the NBP mid rate of the last business day before the transaction date (art. 11a
 ust. 1 and 2 ustawy o PIT).
 
-**Trades: the trade date, with the settlement date kept (Pitly's reading, versioned in `DatePolicy`).** A sale is
-counted in the year of its trade (execution) date and converted at the rate of the day before it; a purchase is
-costed as of its trade date. Art. 17 ust. 1ab pkt 1 ties the income from a sale of securities to the transfer of
-ownership, which for dematerialised securities is the entry on the securities account (art. 7 ust. 2 ustawy o
-obrocie instrumentami finansowymi), that is the settlement day; the trade date is what statements and most
-practice use. Pitly does not decide between the two readings. Every result row carries the audit trail: the
-trade date, the settlement date when the statement gives one (IB Flex `SettleDateTarget`, generic
-`settlement_date`; the Activity Statement and Trading 212 give none), the day of the NBP table actually used and
-the rate. A sale executed in one year that settles in the next is reported for both years as `RECOGNITION_DATE`
-(blocking) and so is a sale in the last three days of December whose statement gives no settlement date; the
-user confirms the year. Within a year the two readings differ only by the rate of a day or two, which is shown,
-not flagged.
+**Trades: the settlement date by default, the trade date by the user's choice (`TaxDecisions.DateBasis`,
+versioned in `DatePolicy` 2025.4).** Art. 17 ust. 1ab pkt 1 ties the income from a sale of securities to the
+transfer of ownership, which for dematerialised securities is the entry on the securities account (art. 7 ust. 2
+ustawy o obrocie instrumentami finansowymi), that is the settlement day; the cost of a purchase is incurred when it
+is paid for, on its settlement day (art. 11a ust. 2: "dzień poniesienia kosztu"). Most interpretations of the tax
+information office and the PIT-8C of Polish brokers follow that reading, so it is the default: a trade is counted
+in the year of its settlement date and converted at the NBP rate of the last business day before it, and its
+commission in another currency too. The FIFO order stays the order of execution. The user may choose the trade
+date instead; the choice is recorded with the session and printed, and it should be the same every year, so that
+a trade at a year end is counted exactly once. Every result row carries the audit trail: the trade date, the
+settlement date when the statement gives one (IB Flex `SettleDateTarget`, generic `settlement_date`), the day of
+the NBP table actually used and the rate.
+
+The Activity Statement and Trading 212 give no settlement date. Their trades are dated and converted by the trade
+date, and one note per year counts them (`SETTLEMENT_DATE_MISSING`, informational); no settlement date is guessed
+from T+1 or T+2. A sale that settles in the next year is counted in the year of the decided date, with a note for
+both years (`RECOGNITION_DATE`, informational) saying where it went, so that a return of the other year does not
+count it again. A sale in the last three days of December without a settlement date cannot be placed by the
+settlement date: it is counted by the trade date for now and blocks filing (`RECOGNITION_DATE`, warning) until the
+Flex Query of the account is uploaded or the trade date is chosen.
+
+Control examples (`TaxDecisionsTests`, `SecondRecheckTests`): buy 10 at 100 USD traded 2025-03-03 and settled
+03-05, sell 10 at 120 USD traded 2025-06-03 and settled 06-05; USD 4.00 except 4.10 on 2025-03-05 and 3.90 on
+2025-06-05. By the settlement date: costs 4100.00, proceeds 4680.00, income 580.00, tax 110 PLN. By the trade
+date: 4000.00, 4800.00, 800.00, 152 PLN. A sale traded 2025-12-30 and settled 2026-01-02 belongs to 2026 by
+default and to 2025 by the trade date; both years are ready to file either way.
 
 Tax paid abroad is converted at the rate of the day before it was paid (art. 11a ust. 3: "zapłaty podatku").
 Tax withheld on the day of the payment therefore shares the payment's rate. Tax paid or re-charged on another day
@@ -206,13 +220,16 @@ An event booked in another year than its payment (an Activity Statement of year 
 the dividend of year N; a Flex row of year N+1 with the `ActionID` of a year-N dividend; a Flex row dated to year
 N but reported in N+1) stays with the payment,
 so the credit of year N already reflects it, and is reported as `CROSS_YEAR_ADJUSTMENT` for both years with the
-amount. **Open question:** whether the tax effect of such a refund belongs to year N (a corrected return) or to
-year N+1 is not decided by Pitly. Art. 45 ust. 3a ustawy o PIT (adding back a deduction that was later refunded
-in the year of the refund) is the candidate rule for year N+1, and a correction of year N is the alternative; the
-IBKR reclassification notice (https://www.interactivebrokers.com/support/faq/content/dividend-income-reclassification-1055108870)
-describes a correction of the original document, which is not the same thing as a refund of tax already
-credited. Until this is confirmed, the row is attributed, flagged and counted as unresolved; the user confirms
-the treatment before filing either year.
+amount. Where its tax effect belongs is the user's decision (`TaxDecisions.CrossYearRefunds`). The recommended
+answer is a correction of year N: the credit of art. 30a ust. 9 is the tax actually paid abroad, so a refund
+means less was paid for year N, and a return already filed for it is corrected (art. 81 O.p.); the IBKR
+reclassification notice (https://www.interactivebrokers.com/support/faq/content/dividend-income-reclassification-1055108870)
+likewise describes a correction of the original document. Art. 45 ust. 3a ustawy o PIT (adding back a refunded
+deduction in the year of the refund) is the alternative reading, which fits section G of PIT-38 badly. With the
+correction confirmed, the finding becomes a note for both years (the year-N figures already include the refund;
+nothing is added in N+1). Unconfirmed, it is counted as unresolved and blocks both years. Control example
+(`TaxDecisionsTests`): the 2024 dividend of 6.20 USD with 0.93 USD withheld, refunded in 2025, gives for 2024 a
+flat tax of 4.71, nothing paid abroad and a difference of 5 PLN; confirmed, 2024 and 2025 are ready to file.
 
 Control examples (USD at 4 PLN):
 
@@ -230,18 +247,24 @@ Control examples (USD at 4 PLN):
 A finding with `AffectsAmounts` that is at least a warning blocks filing: `Pit38Fields.ReadyToFile` is false and
 `UnresolvedAmountPln` sums the money that is not in the declared figures. The dashboard, the PIT-38 page and the
 printout show the same banner and the same list; informational notes (`SHARED_WITHHOLDING`,
-`MIXED_STREAM_ROUNDING`, `RATE_DATE`, `OVERLAP_SKIPPED`, `CREDIT_METHOD`, and `CLASSIFICATION_UNVERIFIED` when it
-only explains that interest was capped at 19%) do not block. A session flagged `NeedsReimport` is never ready
+`MIXED_STREAM_ROUNDING`, `RATE_DATE`, `OVERLAP_SKIPPED`, `CREDIT_METHOD`, `SETTLEMENT_DATE_MISSING`,
+`CLASSIFICATION_DECIDED`, `RECOGNITION_DATE` and `CROSS_YEAR_ADJUSTMENT` once the user's decision settles them, and
+`CLASSIFICATION_UNVERIFIED` when it only explains that interest was capped at 19%) do not block. A session flagged `NeedsReimport` is never ready
 (`REIMPORT_REQUIRED`).
 
-**Classification of income (`CLASSIFICATION_UNVERIFIED`, blocking).** Fees for lending out shares (IB "SYEP",
-recognised by `IncomeClassification.IsSecuritiesLending` in the row's description) and payments in lieu of
-dividends are kept in the amounts under the kind the broker's label suggests (interest, dividend-equivalent), with
-a blocking finding carrying the PLN amount: art. 30a ust. 1 pkt 3 covers interest on money lent and pkt 4
-dividends, and no source Pitly cites settles whether a lending fee or a substitute payment belongs there. The
-income is shown, never hidden, and no rule is added to make the result agree with another calculator; the user
-confirms the treatment before filing. Plain credit interest with foreign tax stays ready to file (its note only
-says the credit was capped at 19%, not at a treaty rate).
+**Classification of income (`CLASSIFICATION_UNVERIFIED`, blocking until decided).** Fees for lending out shares
+(IB "SYEP", recognised by `IncomeClassification.IsSecuritiesLending` in the row's description) and payments in lieu
+of dividends are kept in the amounts under the kind the broker's label suggests (interest, dividend-equivalent):
+art. 30a ust. 1 pkt 3 covers interest on money lent and pkt 4 dividends, and no source Pitly cites settles whether
+a lending fee or a substitute payment belongs there. The user decides (`TaxDecisions.SecuritiesLending`,
+`TaxDecisions.PaymentsInLieu`); for a material amount an individual interpretation (ORD-IN) is the way to legal
+protection. Unconfirmed, each payment carries a blocking finding with its PLN amount. Confirmed as the label says,
+the payment stays in section G with a note (`CLASSIFICATION_DECIDED`). Classified as income from other sources
+(art. 20 ust. 1), it leaves PIT-38 with the foreign tax withheld on it and is listed for PIT-36
+(`Pit38Fields.OtherSourcesIncome`, its totals and a `CLASSIFICATION_DECIDED` note): it is taxed there at the scale
+and its foreign tax is credited under art. 27 ust. 9, which Pitly does not compute. The income is never hidden and
+no rule is added to make the result agree with another calculator. Plain credit interest with foreign tax stays
+ready to file (its note only says the credit was capped at 19%, not at a treaty rate).
 
 **Two formats of one account (`SOURCE_CONFLICT`, blocking).** See [architecture.md](architecture.md), "Accounts
 and merging": where an Activity Statement and a Flex Query of one account disagree on the same day's operations,
@@ -250,9 +273,9 @@ change (a purchase: its year and every later year of the upload; a refund: its b
 year of the upload; other income rows: their year) and is shown only for those years, so a conflict on a 2026
 purchase does not block the 2025 return.
 
-**A sale at the year end (`RECOGNITION_DATE`, blocking).** See "Conversion to PLN": a sale that settles in the
-next year, or one in the last days of December without a settlement date, is reported for both years until the
-user confirms the year.
+**A sale at the year end (`RECOGNITION_DATE`).** See "Conversion to PLN": a sale that settles in the next year is
+counted in the year of the decided date with a note for both years; one in the last days of December without a
+settlement date blocks filing by the settlement date, until the Flex Query is uploaded or the trade date chosen.
 
 **Interest rounded per payment (`INTEREST_ROUNDING_LEVEL`, a warning that does not block).** See "Rounding of
 section G": when the yearly total would round to another figure, the result names both.
@@ -264,7 +287,8 @@ Control examples (USD at 4 PLN):
 | Input | Expected |
 |---|---|
 | Dividend 100 USD with 15 USD withheld, and a payment in lieu of 10 USD with 3 USD withheld, same instrument and day. | Credit 60 PLN on the dividend. On the payment in lieu 12 PLN withheld, 6 PLN creditable (15% of 40 PLN); the payment in lieu blocks filing until its classification is confirmed. |
-| 100 USD of credit interest and 10 USD of "SYEP interest" in one Activity Statement. | Both in the amounts (440 PLN); `CLASSIFICATION_UNVERIFIED` with 40 PLN unresolved; not ready to file. |
+| 100 USD of credit interest and 10 USD of "SYEP interest" in one Activity Statement. | Both in the amounts (440 PLN); `CLASSIFICATION_UNVERIFIED` with 40 PLN unresolved; not ready to file. Confirmed as interest: flat tax 76.00 + 7.60 = 83.60, ready. As other sources: flat tax 76.00, 40 PLN listed for PIT-36, ready. |
+| Flex, one action in PLN: dividend 80 with 12 withheld, payment in lieu 20 with 3 withheld (US issuer). | Confirmed as a dividend: flat tax 19.00, credit 15.00, difference 4. As other sources: flat tax 15.20, credit 12.00, difference 3; 20 PLN with 3 PLN withheld listed for PIT-36. |
 | Generic income: dividend 100 PLN, 15 withheld, ISIN `ZZ...`. | Treaty cap: credit 0, difference 19, `TREATY_RATE_UNKNOWN` naming ZZ with 15 PLN; not ready. Statutory cap, chosen explicitly: credit 15, difference 4, no finding. |
 | The same dividend on two accounts; one statement uploaded twice. | Both accounts count; the repeated statement adds nothing. |
 | Two dividends of 100 USD with 15 USD withheld on each; the next year's statement refunds 20 USD dated back to the first one. | Actually withheld 10 USD = 40 PLN, so the credit is 40 PLN, with a warning about the refund. |
@@ -372,8 +396,9 @@ In the `Money in` / `Money out` layout, `Depositing savings` with €100 in, `In
 ## What the code does not do
 
 - Instruments other than stocks and ETFs (options, futures, bonds as trades, forex, crypto).
-- Decide the tax year of a cross-year refund or re-charge (see "Refunds and corrections").
-- Classify securities-lending income and payments in lieu with legal certainty.
-- Settlement-date conversion.
+- Decide on its own the tax year of a cross-year refund, the classification of securities-lending income and
+  payments in lieu, or the date of a trade: these are the user's decisions, recorded with the result.
+- Compute the tax at the scale on income the user classified as income from other sources (PIT-36).
+- Infer a settlement date that the statement does not give (the Activity Statement, Trading 212).
 - Domestic income reported in PIT-8C (those fields are left for the user).
 - Electronic submission.

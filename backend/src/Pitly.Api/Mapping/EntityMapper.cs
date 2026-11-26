@@ -41,6 +41,8 @@ public static class EntityMapper
             RulesVersion = RuleVersions.Rules + "/rounding-" + RoundingPolicy.Current.Version,
             FormVersion = pit38.Form?.Version,
             CreditMethod = summary.CreditMethod.ToString(),
+            DecisionsJson = JsonSerializer.Serialize(summary.Decisions ?? TaxDecisions.Default, JsonOptions),
+            OtherSourcesIncomeJson = summary.OtherSourcesIncome is { Count: > 0 } ? JsonSerializer.Serialize(summary.OtherSourcesIncome, JsonOptions) : null,
             TradeResults = summary.TradeResults.Select(t => new TradeResultEntity
             {
                 Symbol = t.Symbol,
@@ -146,7 +148,10 @@ public static class EntityMapper
                 : DeserializeWarnings(session.ResultWarningsJson),
             Diagnostics: diagnostics,
             CreditMethod: Enum.TryParse<CreditMethod>(session.CreditMethod, out var method) ? method : CreditMethod.TreatyCap,
-            SourceFiles: Deserialize<List<SourceFile>>(session.SourceFilesJson));
+            SourceFiles: Deserialize<List<SourceFile>>(session.SourceFilesJson),
+            // A session saved before decisions were recorded was computed by the trade date with nothing confirmed.
+            Decisions: Deserialize<TaxDecisions>(session.DecisionsJson) ?? TaxDecisions.Legacy,
+            OtherSourcesIncome: Deserialize<List<OtherSourceIncome>>(session.OtherSourcesIncomeJson) ?? []);
     }
 
     public static Dividend ToDividend(DividendEntity d) => new(
@@ -213,7 +218,9 @@ public static class EntityMapper
             pit38.ReadyToFile,
             pit38.UnresolvedAmountPln,
             CreditMethod = summary.CreditMethod.ToString(),
-            SourceFiles = summary.SourceFiles ?? []
+            SourceFiles = summary.SourceFiles ?? [],
+            Decisions = summary.Decisions ?? TaxDecisions.Legacy,
+            pit38.OtherSourcesIncomePln
         };
     }
 

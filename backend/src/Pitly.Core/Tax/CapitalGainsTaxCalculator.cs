@@ -9,9 +9,15 @@ public interface ICapitalGainsTaxCalculator
     /// <summary>
     /// Computes FIFO results; when <paramref name="warnings"/> is given, consistency checks are appended to it, and
     /// when <paramref name="diagnostics"/> is given, findings about single trades (a sale whose settlement falls
-    /// in the next year) are appended to it.
+    /// in the next year) are appended to it. <paramref name="basis"/> is the date that sets a trade's tax year and
+    /// rate (see <see cref="DatePolicy"/>).
     /// </summary>
-    Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null, List<TaxDiagnostic>? diagnostics = null);
+    Task<List<TradeResult>> CalculateAsync(
+        ParsedStatement statement,
+        TaxPeriod taxPeriod,
+        List<string>? warnings = null,
+        List<TaxDiagnostic>? diagnostics = null,
+        TradeDateBasis basis = TradeDateBasis.SettlementDate);
 }
 
 public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
@@ -28,7 +34,10 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
     private sealed class Context
     {
         public required TaxPeriod TaxPeriod { get; init; }
+        public required TradeDateBasis Basis { get; init; }
         public required IReadOnlyDictionary<string, decimal> CarryInByKey { get; init; }
+        // Trades of the period dated by the trade date only because their statement gives no settlement date
+        public int UndatedSettlements { get; set; }
         public List<TradeResult> Results { get; } = [];
         public Dictionary<string, LinkedList<Lot>> BuyLots { get; } = new(StringComparer.OrdinalIgnoreCase);
         // Old lot key -> current key after a split with a new ISIN, an ISIN change or a merger moved the lots.
@@ -53,7 +62,12 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
     /// another, and a split or rename reported by both statements changes each position exactly once. The accounts
     /// are calculated one after another and their results are combined afterwards.
     /// </summary>
-    public async Task<List<TradeResult>> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, List<string>? warnings = null, List<TaxDiagnostic>? diagnostics = null)
+    public async Task<List<TradeResult>> CalculateAsync(
+        ParsedStatement statement,
+        TaxPeriod taxPeriod,
+        List<string>? warnings = null,
+        List<TaxDiagnostic>? diagnostics = null,
+        TradeDateBasis basis = TradeDateBasis.SettlementDate)
     {
         var carryIns = statement.CarryInPositions ?? [];
         var actions = statement.CorporateActions ?? [];
@@ -64,25 +78,51 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
             .OrderBy(a => a, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var undated = 0;
+        List<TradeResult> results;
         if (accounts.Count <= 1)
-            return await CalculateAccountAsync(statement.Trades, actions, carryIns, taxPeriod, warnings, diagnostics, accountSuffix: string.Empty);
-
-        var results = new List<TradeResult>();
-        foreach (var account in accounts)
         {
-            results.AddRange(await CalculateAccountAsync(
-                statement.Trades.Where(t => SameAccount(t.AccountId, account)).ToList(),
-                actions.Where(a => SameAccount(a.AccountId, account)).ToList(),
-                carryIns.Where(p => SameAccount(p.AccountId, account)).ToList(),
-                taxPeriod,
-                warnings,
-                diagnostics,
-                accountSuffix: account.Length == 0 ? " on the account without a number" : " on account " + account));
+            results = await CalculateAccountAsync(statement.Trades, actions, carryIns, taxPeriod, basis, warnings, diagnostics, accountSuffix: string.Empty, count => undated += count);
+        }
+        else
+        {
+            results = [];
+            foreach (var account in accounts)
+            {
+                results.AddRange(await CalculateAccountAsync(
+                    statement.Trades.Where(t => SameAccount(t.AccountId, account)).ToList(),
+                    actions.Where(a => SameAccount(a.AccountId, account)).ToList(),
+                    carryIns.Where(p => SameAccount(p.AccountId, account)).ToList(),
+                    taxPeriod,
+                    basis,
+                    warnings,
+                    diagnostics,
+                    accountSuffix: account.Length == 0 ? " on the account without a number" : " on account " + account,
+                    count => undated += count));
+            }
+
+            // Stable sort: rows of one account keep their timeline order.
+            results = results.OrderBy(r => r.DateTime).ToList();
         }
 
-        // Stable sort: rows of one account keep their timeline order.
-        return results.OrderBy(r => r.DateTime).ToList();
+        if (undated > 0 && basis == TradeDateBasis.SettlementDate)
+        {
+            diagnostics?.Add(new TaxDiagnostic(DiagnosticCodes.SettlementDateMissing, DiagnosticSeverity.Info,
+                $"{undated} {(undated == 1 ? "trade" : "trades")} of {taxPeriod.Year} come from a statement that gives no settlement date (the Activity Statement, Trading 212): " +
+                "they are dated and converted by the trade date. By the settlement date the rate is that of a day or two later. " +
+                "The Flex Query of an IB account carries the settlement date of every trade.",
+                AffectedYears: [taxPeriod.Year], Decision: DecisionTopics.DateBasis));
+        }
+
+        return results;
     }
+
+    /// <summary>
+    /// The day that sets the trade's tax year and its rate: the settlement date when that is the basis and the
+    /// statement gives it, otherwise the trade date (see <see cref="DatePolicy"/>).
+    /// </summary>
+    private static DateTime RecognitionDate(Trade trade, TradeDateBasis basis)
+        => basis == TradeDateBasis.SettlementDate && trade.SettleDate is { } settle ? settle.Date : trade.DateTime;
 
     private static string AccountKey(string? accountId) => accountId?.Trim() ?? string.Empty;
 
@@ -94,13 +134,16 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         IReadOnlyList<CorporateAction> actions,
         IReadOnlyList<CarryInPosition> carryIns,
         TaxPeriod taxPeriod,
+        TradeDateBasis basis,
         List<string>? warnings,
         List<TaxDiagnostic>? diagnostics,
-        string accountSuffix)
+        string accountSuffix,
+        Action<int> reportUndated)
     {
         var ctx = new Context
         {
             TaxPeriod = taxPeriod,
+            Basis = basis,
             Warnings = warnings,
             Diagnostics = diagnostics,
             AccountSuffix = accountSuffix,
@@ -142,16 +185,21 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         if (!ctx.OpeningPositionsChecked)
             CheckOpeningPositions(ctx);
 
+        reportUndated(ctx.UndatedSettlements);
         return ctx.Results;
     }
 
     private async Task ProcessTradeAsync(Trade trade, Context ctx, string? note)
     {
-        // The trade date sets the tax year and the rate (the NBP table of the last business day before it, art.
-        // 11a ust. 1-2); the settlement date, where the statement gives one, travels with the row for the audit
-        // trail and the year-end check. See DatePolicy.
-        var quote = await _rateService.GetQuoteAsync(trade.Currency, trade.DateTime);
+        // The decided date (the settlement date by default, the trade date where the statement gives none or the
+        // user chose it) sets the tax year and the rate: the NBP table of the last business day before it, art. 11a
+        // ust. 1-2. The FIFO order stays the order of execution. See DatePolicy.
+        var recognised = RecognitionDate(trade, ctx.Basis);
+        var quote = await _rateService.GetQuoteAsync(trade.Currency, recognised);
         var rate = quote.Rate;
+        var inPeriod = ctx.TaxPeriod.IncludesDate(recognised);
+        if (inPeriod && trade.SettleDate is null && note is null)
+            ctx.UndatedSettlements++;
         var lotKey = ResolveAlias(ctx, GetLotKey(trade));
         ctx.KeySymbols[lotKey] = trade.Symbol;
         var lots = GetOrCreateLots(ctx.BuyLots, lotKey);
@@ -159,13 +207,13 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         if (trade.Type == TradeType.Buy)
         {
             var costPerSharePln = trade.Price * rate;
-            var commissionPln = await GetCommissionPlnAsync(trade, rate);
+            var commissionPln = await GetCommissionPlnAsync(trade, rate, recognised);
             var commissionPerSharePln = trade.Quantity > 0 ? commissionPln / trade.Quantity : 0m;
             lots.AddLast(new Lot(trade.Quantity, costPerSharePln, commissionPerSharePln));
 
             var totalBuyCostPln = trade.Quantity * costPerSharePln + commissionPln;
 
-            if (ctx.TaxPeriod.IncludesDate(trade.DateTime))
+            if (inPeriod)
             {
                 ctx.Results.Add(new TradeResult(
                     Symbol: trade.Symbol,
@@ -196,7 +244,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         // Przychod (poz. 22) is the gross sale value; the sell commission is a koszt uzyskania
         // przychodu (art. 22 ust. 1 / art. 23 ust. 1 pkt 38 ustawy o PIT) and belongs in poz. 23.
         var proceedsPln = trade.Proceeds * rate;
-        var sellCommissionPln = await GetCommissionPlnAsync(trade, rate);
+        var sellCommissionPln = await GetCommissionPlnAsync(trade, rate, recognised);
 
         decimal totalCostPln = 0;
         var remainingQty = trade.Quantity;
@@ -229,7 +277,7 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         var totalCostWithSellCommissionPln = totalCostPln + sellCommissionPln;
         var gainLoss = proceedsPln - totalCostWithSellCommissionPln;
 
-        if (ctx.TaxPeriod.IncludesDate(trade.DateTime))
+        if (inPeriod)
         {
             ctx.Results.Add(new TradeResult(
                 Symbol: trade.Symbol,
@@ -255,10 +303,12 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
     /// <summary>
     /// A sale executed in one year that settles in the next belongs to the first year by its trade date and to the
     /// second by the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT read with art. 7 ust. 2 ustawy o
-    /// obrocie instrumentami finansowymi). Pitly counts it in the trade year and does not decide the question:
-    /// the sale is reported for both years and blocks filing until the user confirms the year. Without a
-    /// settlement date in the statement, a sale in the last days of December may settle after the year end under
-    /// T+1 or T+2 and is reported the same way.
+    /// obrocie instrumentami finansowymi). The user's date decision settles which: the sale is counted in that
+    /// year and a note for both years says where it went, so that a return of the other year (perhaps filed under
+    /// the other reading) does not count it again. Without a settlement date in the statement, a sale in the last
+    /// days of December may settle after the year end under T+1 or T+2: by the settlement date its year is then not
+    /// known, and the finding blocks filing until the statement that gives the date is uploaded or the trade date
+    /// is chosen.
     /// </summary>
     private static void CheckRecognitionYear(Trade trade, Context ctx)
     {
@@ -270,23 +320,36 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         {
             if (settle.Year == tradeYear || (ctx.TaxPeriod.Year != tradeYear && ctx.TaxPeriod.Year != settle.Year))
                 return;
-            ctx.Diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.RecognitionDate, DiagnosticSeverity.Warning,
+            var bySettlement = ctx.Basis == TradeDateBasis.SettlementDate;
+            var counted = bySettlement ? settle.Year : tradeYear;
+            var other = bySettlement ? tradeYear : settle.Year;
+            ctx.Diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.RecognitionDate, DiagnosticSeverity.Info,
                 $"Sale of {quantity} {trade.Symbol} executed on {trade.DateTime:yyyy-MM-dd}{ctx.AccountSuffix} settles on {settle:yyyy-MM-dd}: " +
-                $"Pitly counts it in {tradeYear} (the trade date) and converts it at the rate of the day before that date. " +
-                $"Read as the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT: the entry on the securities account) it belongs to {settle.Year}. " +
-                "Pitly does not decide between the two readings; confirm the year before filing either return.",
-                AccountId: trade.AccountId, AffectedYears: new[] { tradeYear, settle.Year }.OrderBy(y => y).ToList(), AffectsAmounts: true));
+                (bySettlement
+                    ? $"by the settlement date (your decision; art. 17 ust. 1ab pkt 1 ustawy o PIT: the entry on the securities account) it is counted in {counted}, at the rate of the day before {settle:yyyy-MM-dd}. "
+                    : $"by the trade date (your decision) it is counted in {counted}, at the rate of the day before {trade.DateTime:yyyy-MM-dd}; by the settlement date it would belong to {settle.Year}. ") +
+                $"It is not in the {other} amounts: if a return for {other} already counted it under the other reading, it must not be counted twice.",
+                AccountId: trade.AccountId, AffectedYears: new[] { tradeYear, settle.Year }.OrderBy(y => y).ToList(), Decision: DecisionTopics.DateBasis));
             return;
         }
 
         if (trade.DateTime.Month != 12 || trade.DateTime.Day < 29 || (ctx.TaxPeriod.Year != tradeYear && ctx.TaxPeriod.Year != tradeYear + 1))
             return;
+        if (ctx.Basis == TradeDateBasis.TradeDate)
+        {
+            ctx.Diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.RecognitionDate, DiagnosticSeverity.Info,
+                $"Sale of {quantity} {trade.Symbol} executed on {trade.DateTime:yyyy-MM-dd}{ctx.AccountSuffix} is counted in {tradeYear} by the trade date (your decision). " +
+                $"It probably settles in {tradeYear + 1} (T+1 or T+2); it is not in the {tradeYear + 1} amounts and must not be counted there again.",
+                AccountId: trade.AccountId, AffectedYears: [tradeYear, tradeYear + 1], Decision: DecisionTopics.DateBasis));
+            return;
+        }
+
         ctx.Diagnostics.Add(new TaxDiagnostic(DiagnosticCodes.RecognitionDate, DiagnosticSeverity.Warning,
             $"Sale of {quantity} {trade.Symbol} executed on {trade.DateTime:yyyy-MM-dd}{ctx.AccountSuffix}: the statement gives no settlement date, " +
-            $"and a sale in the last days of December settles in {tradeYear + 1} under T+1 or T+2. Pitly counts it in {tradeYear} (the trade date); " +
-            $"read as the day ownership passes (art. 17 ust. 1ab pkt 1 ustawy o PIT) it may belong to {tradeYear + 1}. " +
-            "Upload the Flex Query of the account (its rows carry the settlement date) or confirm the year before filing either return.",
-            AccountId: trade.AccountId, AffectedYears: [tradeYear, tradeYear + 1], AffectsAmounts: true));
+            $"and a sale in the last days of December settles in {tradeYear + 1} under T+1 or T+2. By the settlement date (your decision) its year is not known; " +
+            $"it is counted in {tradeYear} by the trade date for now. Upload the Flex Query of the account (its rows carry the settlement date), " +
+            "or choose the trade date for every year.",
+            AccountId: trade.AccountId, AffectedYears: [tradeYear, tradeYear + 1], AffectsAmounts: true, Decision: DecisionTopics.DateBasis));
     }
 
     private async Task ApplyCorporateActionAsync(CorporateAction action, Context ctx)
@@ -547,14 +610,14 @@ public class CapitalGainsTaxCalculator : ICapitalGainsTaxCalculator
         }
     }
 
-    private async Task<decimal> GetCommissionPlnAsync(Trade trade, decimal tradeRate)
+    private async Task<decimal> GetCommissionPlnAsync(Trade trade, decimal tradeRate, DateTime recognised)
     {
         if (trade.Commission == 0)
             return 0;
 
         var commissionRate = trade.CommissionCurrency.Equals(trade.Currency, StringComparison.OrdinalIgnoreCase)
             ? tradeRate
-            : await _rateService.GetRateAsync(trade.CommissionCurrency, trade.DateTime);
+            : await _rateService.GetRateAsync(trade.CommissionCurrency, recognised);
 
         return trade.Commission * commissionRate;
     }

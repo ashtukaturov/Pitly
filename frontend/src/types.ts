@@ -87,6 +87,40 @@ export interface TaxDiagnostic {
   affectsAmounts: boolean;
   /** affectsAmounts and at least a warning. */
   blocksFiling: boolean;
+  /** The user's decision that resolves the finding or that it reports on. */
+  decision?: DecisionTopic | null;
+}
+
+/** Which date of a trade sets its tax year and its exchange rate (backend TradeDateBasis). */
+export type TradeDateBasis = 'SettlementDate' | 'TradeDate';
+export type LendingIncomeTreatment = 'Unconfirmed' | 'Interest' | 'OtherSources';
+export type PaymentInLieuTreatment = 'Unconfirmed' | 'Dividend' | 'OtherSources';
+export type CrossYearRefundTreatment = 'Unconfirmed' | 'CorrectOriginalYear';
+
+/** The user's answers to the questions no source settles (backend TaxDecisions). */
+export interface TaxDecisions {
+  dateBasis: TradeDateBasis;
+  securitiesLending: LendingIncomeTreatment;
+  paymentsInLieu: PaymentInLieuTreatment;
+  crossYearRefunds: CrossYearRefundTreatment;
+}
+
+export type DecisionTopic = keyof TaxDecisions;
+
+/** A payment classified as income from other sources: declared in PIT-36, not in PIT-38 (backend OtherSourceIncome). */
+export interface OtherSourceIncome {
+  symbol: string;
+  currency: string;
+  date: string;
+  kind: string;
+  amountOriginal: number;
+  amountPln: number;
+  withholdingTaxPln: number;
+  exchangeRate: number;
+  isin?: string | null;
+  countryCode?: string | null;
+  accountId?: string | null;
+  sourceFile?: string | null;
 }
 
 /** The rounding rules applied to section G, with their version and sources (backend RoundingPolicy). */
@@ -106,6 +140,7 @@ export interface DatePolicy {
   rateRule: string;
   recognitionRuleIsInterpretation: boolean;
   sources: string[];
+  basis?: TradeDateBasis;
 }
 
 /** How the foreign tax credit is limited: the treaty cap (default, MF/KIS) or the statutory 19% cap (NSA comparison). */
@@ -242,6 +277,12 @@ export interface Pit38Fields {
   roundingPolicy: RoundingPolicy | null;
   creditMethod: CreditMethod;
   datePolicy?: DatePolicy | null;
+  // The user's answers the amounts were computed with
+  decisions?: TaxDecisions | null;
+  // Payments classified as income from other sources: left out of section G, declared in PIT-36
+  otherSourcesIncome?: OtherSourceIncome[];
+  otherSourcesIncomePln?: number;
+  otherSourcesWithholdingPln?: number;
 }
 
 /** Field numbers (poz.) of one verified PIT-38 form version; mirrors backend Pit38FormLayout. */
@@ -317,6 +358,8 @@ export interface AppState {
   withholdingEvents: WithholdingEvent[];
   // How the foreign tax credit is limited; the treaty cap unless the user chose otherwise at import
   creditMethod: CreditMethod;
+  // The user's answers to the questions no source settles; sent with every recalculation
+  decisions: TaxDecisions;
 }
 
 /** What the dashboard can ask to recalculate without re-selecting the files. */
@@ -326,4 +369,5 @@ export interface RecalculateOptions {
   /** For files without an account number: file name -> account label chosen by the user. */
   accountLabels?: Record<string, string>;
   creditMethod?: CreditMethod;
+  decisions?: TaxDecisions;
 }

@@ -5,6 +5,7 @@ import { formatPln, numColor, formatTaxPeriod, hasCustomTaxPeriod } from '../for
 import type { AppState, ImportedFile, RecalculateOptions } from '../types';
 import EmptyState from '../components/EmptyState';
 import DiagnosticsPanel from '../components/DiagnosticsPanel';
+import DecisionsPanel from '../components/DecisionsPanel';
 import { useT } from '../i18n';
 
 export default function DashboardPage({
@@ -170,6 +171,13 @@ export default function DashboardPage({
       </div>
 
       <DiagnosticsPanel pit38={pit38} compact />
+
+      <DecisionsPanel
+        pit38={pit38}
+        decisions={state.decisions}
+        busy={switchingYear}
+        onChange={onRecalculate && state.files.length > 0 ? (decisions) => onRecalculate({ decisions }) : undefined}
+      />
 
       {warningCount > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 text-sm text-amber-200">

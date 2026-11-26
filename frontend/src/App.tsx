@@ -10,6 +10,7 @@ import Pit38Page from './pages/Pit38Page';
 import { describeImportError, importFiles } from './api';
 import { useT } from './i18n';
 import type { AppState, RecalculateOptions } from './types';
+import { DEFAULT_DECISIONS } from './decisions';
 
 const emptyState: AppState = {
   sessionId: null,
@@ -24,6 +25,7 @@ const emptyState: AppState = {
   accountLabels: {},
   withholdingEvents: [],
   creditMethod: 'TreatyCap',
+  decisions: DEFAULT_DECISIONS,
 };
 
 function AppLayout({ year }: { year: number | null }) {
@@ -62,6 +64,7 @@ export default function App() {
     const residencyStartDate = 'residencyStartDate' in options ? options.residencyStartDate : state.residencyStartDate;
     const accountLabels = options.accountLabels ?? state.accountLabels;
     const creditMethod = options.creditMethod ?? state.creditMethod;
+    const decisions = options.decisions ?? state.decisions;
     setSwitchingYear(true);
     setYearError(null);
     try {
@@ -71,6 +74,7 @@ export default function App() {
         taxYear: year,
         accountLabels,
         creditMethod,
+        decisions,
       });
       setState(prev => ({
         ...prev,
@@ -85,6 +89,7 @@ export default function App() {
         residencyStartDate,
         withholdingEvents: result.withholdingEvents ?? [],
         creditMethod,
+        decisions,
       }));
     } catch (err: unknown) {
       setYearError(describeImportError(err, t) || t('app.switchYearFailed'));
@@ -104,6 +109,7 @@ export default function App() {
               onComplete={handleImportComplete}
               existingFiles={state.files}
               accountLabels={state.accountLabels}
+              decisions={state.decisions}
               onStartOver={handleStartOver}
             />
           }
@@ -114,7 +120,7 @@ export default function App() {
         />
         <Route path="transactions" element={<TransactionsPage state={state} />} />
         <Route path="dividends" element={<DividendsPage state={state} />} />
-        <Route path="pit38" element={<Pit38Page state={state} />} />
+        <Route path="pit38" element={<Pit38Page state={state} onRecalculate={handleRecalculate} switching={switchingYear} error={yearError} />} />
       </Route>
     </Routes>
   );

@@ -7,6 +7,7 @@ import { transactions } from './transactions';
 import { dividends } from './dividends';
 import { pit38 } from './pit38';
 import { diagnostics } from './diagnostics';
+import { decisions } from './decisions';
 
 /** All UI strings, one module per page. Each module has identical keys in en, uk and pl. */
 export const translations: Translations = mergeTranslations([
@@ -18,4 +19,5 @@ export const translations: Translations = mergeTranslations([
   dividends,
   pit38,
   diagnostics,
+  decisions,
 ]);

@@ -76,6 +76,9 @@ public static class ImportEndpoints
                     return Results.BadRequest(new { error = "creditMethod must be TreatyCap or StatutoryCap." });
             }
 
+            if (!TaxDecisionsJson.TryParse(form["decisions"].FirstOrDefault(), out var decisions, out var decisionsError))
+                return Results.BadRequest(new { error = decisionsError });
+
             var files = form.Files
                 .Where(f => f.Length > 0)
                 .ToList();
@@ -105,7 +108,7 @@ public static class ImportEndpoints
                 try
                 {
                     var result = await importService.ImportStatementsAsync(
-                        streams, residencyStartDate, priorYearLosses, taxYear, files.Select(f => f.FileName).ToList(), accountLabels, creditMethod);
+                        streams, residencyStartDate, priorYearLosses, taxYear, files.Select(f => f.FileName).ToList(), accountLabels, creditMethod, decisions);
                     // Single source of truth for the form values: computed here with decimal arithmetic
                     // instead of being re-derived on the frontend with floating point.
                     var pit38 = Pit38Fields.FromSummary(result.Summary);

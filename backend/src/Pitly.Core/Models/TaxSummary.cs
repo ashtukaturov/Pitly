@@ -40,7 +40,12 @@ public record TaxSummary(
     // How the foreign tax credit was limited
     CreditMethod CreditMethod = CreditMethod.TreatyCap,
     // The uploaded files, hashed, for provenance
-    IReadOnlyList<SourceFile>? SourceFiles = null);
+    IReadOnlyList<SourceFile>? SourceFiles = null,
+    // The user's answers to the questions no source settles (date of a trade, classifications, cross-year refunds);
+    // null for a session stored before they existed, which was computed as TaxDecisions.Legacy
+    TaxDecisions? Decisions = null,
+    // Payments the user classified as income from other sources: declared in PIT-36, not in section G
+    IReadOnlyList<OtherSourceIncome>? OtherSourcesIncome = null);
 
 /// <summary>One uploaded file as the session remembers it: its hash and what it was read as, never its content.</summary>
 public record SourceFile(

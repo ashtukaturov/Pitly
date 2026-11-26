@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
 import { Upload, Download, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { describeImportError, importFiles, ImportError } from '../api';
-import type { AppState, CreditMethod } from '../types';
+import type { AppState, CreditMethod, TaxDecisions } from '../types';
+import { DEFAULT_DECISIONS } from '../decisions';
 import PriorYearLossesInput from '../components/PriorYearLossesInput';
 import { validatePriorYearLossRows, type PriorYearLossRow } from '../priorYearLosses';
 import { useT, useLang, type Lang } from '../i18n/index';
@@ -59,6 +60,7 @@ export default function ImportPage({
   onComplete,
   existingFiles = [],
   accountLabels = NO_ACCOUNT_LABELS,
+  decisions = DEFAULT_DECISIONS,
   onStartOver,
 }: {
   onComplete: (data: AppState) => void;
@@ -66,6 +68,8 @@ export default function ImportPage({
   existingFiles?: File[];
   // The user's earlier choice of account for files without an account number
   accountLabels?: Record<string, string>;
+  // The user's earlier answers to the open tax questions (made on the dashboard); kept when files are added
+  decisions?: TaxDecisions;
   onStartOver?: () => void;
 }) {
   const t = useT();
@@ -121,6 +125,7 @@ export default function ImportPage({
         taxYear,
         accountLabels,
         creditMethod,
+        decisions,
       });
       clearTimeout(timer1);
       clearTimeout(timer2);
@@ -141,6 +146,7 @@ export default function ImportPage({
           accountLabels,
           withholdingEvents: result.withholdingEvents ?? [],
           creditMethod,
+          decisions,
         });
       }, 600);
     } catch (err: unknown) {
@@ -155,7 +161,7 @@ export default function ImportPage({
       if (err instanceof ImportError)
         setOtherYears(err.availableYears.filter(year => year !== err.taxYear));
     }
-  }, [onComplete, pendingFiles, existingFiles, accountLabels, residencyStartDate, priorYearLosses, creditMethod, t]);
+  }, [onComplete, pendingFiles, existingFiles, accountLabels, residencyStartDate, priorYearLosses, creditMethod, decisions, t]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();

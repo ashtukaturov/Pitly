@@ -89,7 +89,16 @@ public record Pit38Fields(
     CreditMethod CreditMethod = CreditMethod.TreatyCap,
 
     // The dates a trade is recognised and converted on, with their version and sources
-    DatePolicy? DatePolicy = null)
+    DatePolicy? DatePolicy = null,
+
+    // The user's answers the amounts were computed with
+    TaxDecisions? Decisions = null,
+
+    // Payments the user classified as income from other sources (art. 20 ust. 1): declared in PIT-36 at the scale,
+    // so they are not in section G; listed with their totals so that nothing is lost between the two returns
+    IReadOnlyList<OtherSourceIncome>? OtherSourcesIncome = null,
+    decimal OtherSourcesIncomePln = 0m,
+    decimal OtherSourcesWithholdingPln = 0m)
 {
     public static Pit38Fields FromSummary(TaxSummary summary)
     {
@@ -240,7 +249,12 @@ public record Pit38Fields(
             UnresolvedAmountPln: diagnostics.Where(d => d.BlocksFiling).Sum(d => d.UnresolvedAmountPln ?? 0m),
             RoundingPolicy: RoundingPolicy.Current,
             CreditMethod: summary.CreditMethod,
-            DatePolicy: DatePolicy.Current);
+            DatePolicy: DatePolicy.For((summary.Decisions ?? TaxDecisions.Legacy).DateBasis),
+            Decisions: summary.Decisions ?? TaxDecisions.Legacy,
+            OtherSourcesIncome: summary.OtherSourcesIncome ?? [],
+            // Each payment is listed in zł, gr and the totals add up the listed figures, so that the table adds up.
+            OtherSourcesIncomePln: (summary.OtherSourcesIncome ?? []).Sum(o => RoundToGrosz(o.AmountPln)),
+            OtherSourcesWithholdingPln: (summary.OtherSourcesIncome ?? []).Sum(o => RoundToGrosz(o.WithholdingTaxPln)));
     }
 
     private static string Grosz(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);

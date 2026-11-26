@@ -5,7 +5,7 @@ namespace Pitly.Core.Tax;
 
 public interface ITaxCalculator
 {
-    Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, CreditMethod creditMethod = CreditMethod.TreatyCap);
+    Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, CreditMethod creditMethod = CreditMethod.TreatyCap, TaxDecisions? decisions = null);
 }
 
 /// <summary>
@@ -26,17 +26,18 @@ public class TaxCalculator : ITaxCalculator
         _dividendTaxCalculator = dividendTaxCalculator;
     }
 
-    public async Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, CreditMethod creditMethod = CreditMethod.TreatyCap)
+    public async Task<TaxSummary> CalculateAsync(ParsedStatement statement, TaxPeriod taxPeriod, CreditMethod creditMethod = CreditMethod.TreatyCap, TaxDecisions? decisions = null)
     {
+        decisions ??= TaxDecisions.Default;
         // The two calculators run concurrently, so each gets its own list. What they report puts the result itself
         // in doubt (history that does not add up, withholding that could not be attributed) and is therefore kept
         // apart from the informational statement warnings: it is repeated on PIT-38 and in the printed report.
         var capitalGainWarnings = new List<string>();
         var tradeDiagnostics = new List<TaxDiagnostic>();
         var dividendDiagnostics = new List<TaxDiagnostic>();
-        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, capitalGainWarnings, tradeDiagnostics);
+        var tradeResultsTask = _capitalGainsCalculator.CalculateAsync(statement, taxPeriod, capitalGainWarnings, tradeDiagnostics, decisions.DateBasis);
         var dividendsTask = _dividendTaxCalculator.CalculateAsync(
-            statement.Dividends, statement.WithholdingTaxes, taxPeriod, creditMethod, dividendDiagnostics);
+            statement.Dividends, statement.WithholdingTaxes, taxPeriod, creditMethod, dividendDiagnostics, decisions);
         await Task.WhenAll(tradeResultsTask, dividendsTask);
         var tradeResults = tradeResultsTask.Result;
         var dividendResult = dividendsTask.Result;
@@ -115,6 +116,8 @@ public class TaxCalculator : ITaxCalculator
             ResultWarnings: resultWarnings,
             Diagnostics: diagnostics,
             WithholdingEvents: dividendResult.Events,
-            CreditMethod: creditMethod);
+            CreditMethod: creditMethod,
+            Decisions: decisions,
+            OtherSourcesIncome: dividendResult.OtherSources ?? []);
     }
 }

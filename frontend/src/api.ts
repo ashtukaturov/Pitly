@@ -1,4 +1,4 @@
-import type { ImportResponse, TradesPage, DividendResult, TaxSummary, Pit38Fields, PriorYearLossInput, CreditMethod, WithholdingEvent } from './types';
+import type { ImportResponse, TradesPage, DividendResult, TaxSummary, Pit38Fields, PriorYearLossInput, CreditMethod, WithholdingEvent, TaxDecisions } from './types';
 import type { TFunction } from './i18n';
 
 const BASE = '/api';
@@ -16,6 +16,8 @@ export interface ImportOptions {
   accountLabels?: Record<string, string>;
   /** How the foreign tax credit is limited; omitted means the treaty cap. */
   creditMethod?: CreditMethod;
+  /** The user's answers to the questions no source settles; omitted means the backend defaults. */
+  decisions?: TaxDecisions;
 }
 
 /** A failed import, with what the server said about it so the UI can localise the message and offer a way out. */
@@ -68,6 +70,7 @@ function buildImportForm(files: File[], options: ImportOptions): FormData {
   if (options.taxYear) form.append('taxYear', String(options.taxYear));
   if (options.accountLabels && Object.keys(options.accountLabels).length > 0) form.append('accountLabels', JSON.stringify(options.accountLabels));
   if (options.creditMethod && options.creditMethod !== 'TreatyCap') form.append('creditMethod', options.creditMethod);
+  if (options.decisions) form.append('decisions', JSON.stringify(options.decisions));
   return form;
 }
 

@@ -31,7 +31,8 @@ public class ImportService : IImportService
         int? taxYear = null,
         IReadOnlyList<string>? fileNames = null,
         IReadOnlyDictionary<string, string>? accountLabels = null,
-        CreditMethod creditMethod = CreditMethod.TreatyCap)
+        CreditMethod creditMethod = CreditMethod.TreatyCap,
+        TaxDecisions? decisions = null)
     {
         if (fileStreams.Count == 0)
             throw new FormatException("No files uploaded.");
@@ -109,7 +110,7 @@ public class ImportService : IImportService
                     "Upload the year(s) in which you sold shares or received dividends; earlier years can be added alongside for FIFO history.");
             }
 
-            var calculated = await _calculator.CalculateAsync(merged, taxPeriod, creditMethod) with
+            var calculated = await _calculator.CalculateAsync(merged, taxPeriod, creditMethod, decisions ?? TaxDecisions.Default) with
             {
                 PriorYearLosses = priorYearLosses ?? [],
                 SourceFiles = sourceFiles

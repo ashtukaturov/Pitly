@@ -112,7 +112,8 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         string? residencyStartDate = null,
         string? priorYearLossesJson = null,
         string? accountLabelsJson = null,
-        string? creditMethod = null)
+        string? creditMethod = null,
+        string? decisionsJson = null)
     {
         using var form = new MultipartFormDataContent();
         foreach (var (name, csv) in files)
@@ -127,6 +128,7 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         if (priorYearLossesJson is not null) form.Add(new StringContent(priorYearLossesJson), "priorYearLosses");
         if (accountLabelsJson is not null) form.Add(new StringContent(accountLabelsJson), "accountLabels");
         if (creditMethod is not null) form.Add(new StringContent(creditMethod), "creditMethod");
+        if (decisionsJson is not null) form.Add(new StringContent(decisionsJson), "decisions");
 
         using var client = CreateClient();
         using var response = await client.PostAsync("/api/import", form);

@@ -19,17 +19,21 @@ public interface IDividendTaxCalculator
     /// <summary>
     /// The full calculation: withholding is matched over the whole <paramref name="history"/>, then the payments
     /// of <paramref name="period"/> (all of them when null) are converted and their credit is capped by
-    /// <paramref name="method"/>. Every finding goes to <paramref name="diagnostics"/>.
+    /// <paramref name="method"/>. Every finding goes to <paramref name="diagnostics"/>. The user's
+    /// <paramref name="decisions"/> classify securities-lending income and payments in lieu and say where a
+    /// cross-year refund belongs; without them nothing is confirmed.
     /// </summary>
     Task<DividendCalculation> CalculateAsync(
         IReadOnlyList<RawDividend> history,
         IReadOnlyList<RawWithholdingTax> events,
         TaxPeriod? period,
         CreditMethod method,
-        List<TaxDiagnostic> diagnostics);
+        List<TaxDiagnostic> diagnostics,
+        TaxDecisions? decisions = null);
 }
 
-public sealed record DividendCalculation(List<Dividend> Dividends, List<WithholdingEvent> Events);
+/// <param name="OtherSources">Payments of the period the user classified as income from other sources: not in <paramref name="Dividends"/>.</param>
+public sealed record DividendCalculation(List<Dividend> Dividends, List<WithholdingEvent> Events, List<OtherSourceIncome>? OtherSources = null);
 
 public class DividendTaxCalculator : IDividendTaxCalculator
 {
@@ -68,8 +72,10 @@ public class DividendTaxCalculator : IDividendTaxCalculator
         IReadOnlyList<RawWithholdingTax> events,
         TaxPeriod? period,
         CreditMethod method,
-        List<TaxDiagnostic> diagnostics)
+        List<TaxDiagnostic> diagnostics,
+        TaxDecisions? decisions = null)
     {
+        decisions ??= TaxDecisions.Default;
         var rates = new Dictionary<string, decimal>(StringComparer.Ordinal);
         var payments = new List<Payment>();
         foreach (var div in history)
@@ -187,8 +193,11 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                     }
                 }
 
-                // Money that moved in another year than the income is a policy question (correction of the income's
-                // year or an event of the booking year); it is flagged for both years and never decided here.
+                // Money that moved in another year than the income: the tax effect belongs either to the income's
+                // year (a corrected return) or to the booking year. The user decides; until then it is flagged for
+                // both years. With the correction of the original year confirmed, the amounts already say it all:
+                // the event is attributed to its payment, the credit of that year is the tax actually paid
+                // (art. 30a ust. 9), and the booking year has nothing to add.
                 foreach (var link in currencyGroup.Where(l => l.Event.BookingYear is { } y && y != paymentYear))
                 {
                     var bookingYear = link.Event.BookingYear!.Value;
@@ -197,11 +206,22 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                     var amount = link.Event.Amount * link.Share;
                     var amountPln = Math.Abs(amount) * await RateAsync(rates, currency, link.Event.EffectiveDate);
                     var what = amount < 0m ? "refund of tax withheld" : "additional tax";
+                    var years = new[] { paymentYear, bookingYear }.OrderBy(y => y).ToList();
+                    var head = $"A {what} on {payment.Raw.Symbol} paid on {payment.Raw.Date:yyyy-MM-dd} ({paymentYear}) belongs to {bookingYear} by its {link.Event.BookingYearEvidence}: {Money(Math.Abs(amount), currency)} ({Pln(amountPln)}). " +
+                        $"It is attributed to the {paymentYear} payment, so the {paymentYear} credit already reflects it. ";
+                    if (decisions.CrossYearRefunds == CrossYearRefundTreatment.CorrectOriginalYear)
+                    {
+                        Add(new TaxDiagnostic(DiagnosticCodes.CrossYearAdjustment, DiagnosticSeverity.Info,
+                            head + $"As you decided, its effect belongs to {paymentYear}: the credit of art. 30a ust. 9 is the tax actually paid abroad. " +
+                            $"If the {paymentYear} return was filed without it, file a corrected return for {paymentYear} (art. 81 O.p.) with these amounts; nothing is added in {bookingYear}.",
+                            link.Event.SourceFile, payment.Raw.AccountId, years, Decision: DecisionTopics.CrossYearRefunds));
+                        continue;
+                    }
+
                     Add(new TaxDiagnostic(DiagnosticCodes.CrossYearAdjustment, DiagnosticSeverity.Warning,
-                        $"A {what} on {payment.Raw.Symbol} paid on {payment.Raw.Date:yyyy-MM-dd} ({paymentYear}) belongs to {bookingYear} by its {link.Event.BookingYearEvidence}: {Money(Math.Abs(amount), currency)} ({Pln(amountPln)}). " +
-                        $"It is attributed to the {paymentYear} payment, so the {paymentYear} credit already reflects it. Whether its tax effect belongs to {paymentYear} (a corrected return, art. 81 O.p.) " +
-                        $"or to {bookingYear} (art. 45 ust. 3a ustawy o PIT) is not decided by Pitly; confirm the treatment before filing either year.",
-                        link.Event.SourceFile, payment.Raw.AccountId, new[] { paymentYear, bookingYear }.OrderBy(y => y).ToList(), amountPln, AffectsAmounts: true));
+                        head + $"Whether its tax effect belongs to {paymentYear} (a corrected return, art. 81 O.p.) " +
+                        $"or to {bookingYear} (art. 45 ust. 3a ustawy o PIT) is your decision; confirm the treatment before filing either year.",
+                        link.Event.SourceFile, payment.Raw.AccountId, years, amountPln, AffectsAmounts: true, Decision: DecisionTopics.CrossYearRefunds));
                 }
             }
 
@@ -303,9 +323,27 @@ public class DividendTaxCalculator : IDividendTaxCalculator
         }
 
         var results = new List<Dividend>();
+        var otherSources = new List<OtherSourceIncome>();
         foreach (var payment in payments.Where(p => InPeriod(p.Raw.Date)))
         {
             var div = payment.Raw;
+
+            // Income whose classification the user decides (securities lending, payments in lieu). Classified as
+            // income from other sources (art. 20 ust. 1), it is declared in PIT-36 at the scale: it leaves section
+            // G with the foreign tax withheld on it, which PIT-36 credits under art. 27 ust. 9.
+            var topic = ClassificationTopic(div);
+            if (topic is not null && IsOtherSources(topic, decisions))
+            {
+                otherSources.Add(new OtherSourceIncome(div.Symbol, div.Currency, div.Date, div.Kind, div.Amount, payment.AmountPln,
+                    payment.WithheldPln, payment.Rate, div.Isin, div.CountryCode, div.AccountId, div.SourceFile));
+                Add(new TaxDiagnostic(DiagnosticCodes.ClassificationDecided, DiagnosticSeverity.Info,
+                    $"{div.Symbol} ({div.Date:yyyy-MM-dd}, {Money(div.Amount, div.Currency)} = {Pln(payment.AmountPln)}" +
+                    (payment.WithheldPln > 0m ? $", foreign tax {Pln(payment.WithheldPln)}" : string.Empty) + "): " +
+                    "as you decided, this is income from other sources (art. 20 ust. 1 ustawy o PIT). It is not in PIT-38; declare it in PIT-36, taxed at the scale" +
+                    (payment.WithheldPln > 0m ? ", where the foreign tax is credited under art. 27 ust. 9" : string.Empty) + ". Pitly does not compute that tax.",
+                    div.SourceFile, div.AccountId, [div.Date.Year], Decision: topic));
+                continue;
+            }
 
             // Art. 30a ust. 9: the foreign tax credit cannot exceed 19% of the income. On top of that, for dividends
             // only tax withheld in line with the applicable treaty is creditable (TreatyCap): the excess (e.g. 30% US
@@ -352,13 +390,22 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                     div.SourceFile, div.AccountId, [div.Date.Year]));
             }
 
-            if (!string.IsNullOrWhiteSpace(div.ClassificationNote))
+            if (topic is not null && IsConfirmedAsLabelled(topic, decisions))
+            {
+                Add(new TaxDiagnostic(DiagnosticCodes.ClassificationDecided, DiagnosticSeverity.Info,
+                    $"{div.Symbol} ({div.Date:yyyy-MM-dd}, {Money(div.Amount, div.Currency)} = {Pln(payment.AmountPln)}): " +
+                    (topic == DecisionTopics.SecuritiesLending
+                        ? "as you decided, this lending income is declared as interest in section G of PIT-38 (art. 30a ust. 1 pkt 3)."
+                        : "as you decided, this payment in lieu is declared like a dividend in section G of PIT-38 (art. 30a ust. 1 pkt 4)."),
+                    div.SourceFile, div.AccountId, [div.Date.Year], Decision: topic));
+            }
+            else if (!string.IsNullOrWhiteSpace(div.ClassificationNote))
             {
                 // The income is in the amounts under the kind the statement suggests; the user has to confirm the
                 // classification before filing, so the finding blocks and names the money that depends on it.
                 Add(new TaxDiagnostic(DiagnosticCodes.ClassificationUnverified, DiagnosticSeverity.Warning,
                     $"{div.Symbol} ({div.Date:yyyy-MM-dd}, {Money(div.Amount, div.Currency)} = {Pln(payment.AmountPln)}): {div.ClassificationNote}",
-                    div.SourceFile, div.AccountId, [div.Date.Year], payment.AmountPln, AffectsAmounts: true));
+                    div.SourceFile, div.AccountId, [div.Date.Year], payment.AmountPln, AffectsAmounts: true, Decision: topic));
             }
 
             results.Add(new Dividend(
@@ -382,8 +429,32 @@ public class DividendTaxCalculator : IDividendTaxCalculator
                 WithholdingSource: payment.Source));
         }
 
-        return new DividendCalculation(results, eventRecords.OrderBy(e => e.Date).ThenBy(e => e.Symbol).ToList());
+        return new DividendCalculation(results, eventRecords.OrderBy(e => e.Date).ThenBy(e => e.Symbol).ToList(), otherSources);
     }
+
+    /// <summary>The decision that classifies the payment, or null for income whose classification is not in question.</summary>
+    private static string? ClassificationTopic(RawDividend div)
+    {
+        if (div.Kind == IncomeKind.PaymentInLieu)
+            return DecisionTopics.PaymentsInLieu;
+        if (div.ClassificationNote == IncomeClassification.SecuritiesLendingNote)
+            return DecisionTopics.SecuritiesLending;
+        return null;
+    }
+
+    private static bool IsOtherSources(string topic, TaxDecisions decisions) => topic switch
+    {
+        DecisionTopics.SecuritiesLending => decisions.SecuritiesLending == LendingIncomeTreatment.OtherSources,
+        DecisionTopics.PaymentsInLieu => decisions.PaymentsInLieu == PaymentInLieuTreatment.OtherSources,
+        _ => false
+    };
+
+    private static bool IsConfirmedAsLabelled(string topic, TaxDecisions decisions) => topic switch
+    {
+        DecisionTopics.SecuritiesLending => decisions.SecuritiesLending == LendingIncomeTreatment.Interest,
+        DecisionTopics.PaymentsInLieu => decisions.PaymentsInLieu == PaymentInLieuTreatment.Dividend,
+        _ => false
+    };
 
     /// <summary>One tax withheld on a payment and what is left of it after the refunds were netted.</summary>
     private sealed class Withheld
