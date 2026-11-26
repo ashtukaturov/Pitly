@@ -115,7 +115,7 @@ public class FlexAndRevolutImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("flex.csv", csv)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(1200m, result.Field("innePrzychody"));
         Assert.Equal(1008m, result.Field("inneKoszty"));
         Assert.Equal(36m, result.Field("podatekNalezny"));
@@ -151,7 +151,7 @@ public class FlexAndRevolutImportTests
 
         foreach (var result in new[] { alone, both, reversed })
         {
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.Equal(1200m, result.Field("innePrzychody"));   // 20 x 15 USD once, not twice
             Assert.Equal(1000m, result.Field("inneKoszty"));      // one purchase, one split
             Assert.Equal(400m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
@@ -179,7 +179,7 @@ public class FlexAndRevolutImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a.csv", accountA.Build()), ("b.csv", accountB.Build()), ("flex-may.csv", partialFlex.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(3, result.Body.GetProperty("dividends").GetArrayLength());   // May A, August A, May B
         Assert.Equal(1200m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(180m, result.Field("podatekZaplaconyZaGranica"));
@@ -199,7 +199,7 @@ public class FlexAndRevolutImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("flex.csv", csv)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(2, result.Body.GetProperty("dividends").GetArrayLength());
         Assert.Equal(800m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(120m, result.Field("podatekZaplaconyZaGranica"));
@@ -219,7 +219,7 @@ public class FlexAndRevolutImportTests
 
         using var app = new PitlyApp();
         var year2025 = await app.ImportAsync([("flex.csv", csv)], taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, year2025.Status);
+        year2025.AssertOk();
         Assert.Equal(60m, year2025.Field("podatekZaplaconyZaGranica"));           // MSFT untouched
         Assert.DoesNotContain("UNMATCHED_WHT", Codes(year2025));
         var crossYear = Assert.Single(Diagnostics(year2025), d => d.GetProperty("code").GetString() == "CROSS_YEAR_ADJUSTMENT");
@@ -304,8 +304,8 @@ public class FlexAndRevolutImportTests
         var fromRevolut = await app.ImportAsync([("revolut.csv", revolut)]);
         var fromGeneric = await app.ImportAsync([("income.csv", generic.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, fromRevolut.Status);
-        Assert.Equal(HttpStatusCode.OK, fromGeneric.Status);
+        fromRevolut.AssertOk();
+        fromGeneric.AssertOk();
         Assert.Equal(1.6051m, fromRevolut.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(fromGeneric.Summary.GetProperty("totalDividendsPln").GetDecimal(), fromRevolut.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(0.32m, fromRevolut.Field("zryczaltowanyPodatek"));
@@ -336,7 +336,7 @@ public class FlexAndRevolutImportTests
         var a = await app.ImportAsync([("jan.csv", january), ("year.csv", fullYear)], accountLabelsJson: """{"jan.csv":"savings","year.csv":"savings"}""");
         var b = await app.ImportAsync([("year.csv", fullYear), ("jan.csv", january)], accountLabelsJson: """{"jan.csv":"savings","year.csv":"savings"}""");
 
-        Assert.Equal(HttpStatusCode.OK, a.Status);
+        a.AssertOk();
         Assert.Equal(0.135m, a.Summary.GetProperty("totalDividendsPln").GetDecimal());   // 0.03 EUR x 4.50
         Assert.Equal(a.Summary.GetProperty("totalDividendsPln").GetDecimal(), b.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(a.Field("podatekDoZaplaty"), b.Field("podatekDoZaplaty"));

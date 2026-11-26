@@ -32,7 +32,7 @@ public class WithholdingReconciliationTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", statement.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(100m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(10m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());
         Assert.Equal(10m, result.Summary.GetProperty("totalCreditableWithholdingPln").GetDecimal());
@@ -58,7 +58,7 @@ public class WithholdingReconciliationTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", statement.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(100m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(0m, result.Summary.GetProperty("totalCreditableWithholdingPln").GetDecimal());
         var diagnostic = Assert.Single(Diagnostics(result), d => d.GetProperty("code").GetString() == "UNMATCHED_WHT");
@@ -93,7 +93,7 @@ public class WithholdingReconciliationTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a.csv", accountA.Build()), ("b.csv", accountB.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         var rows = result.Body.GetProperty("dividends").EnumerateArray().ToList();
         var onA = rows.Single(r => r.GetProperty("symbol").GetString() == "AAPL");
         var onB = rows.Single(r => r.GetProperty("symbol").GetString() == "MSFT");
@@ -133,7 +133,7 @@ public class WithholdingReconciliationTests
 
         // 2025: the other dividend keeps its full credit and nothing is unresolved about it.
         var result2025 = await app.ImportAsync(files, taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, result2025.Status);
+        result2025.AssertOk();
         var msft = Assert.Single(result2025.Body.GetProperty("dividends").EnumerateArray());
         Assert.Equal(15m, msft.GetProperty("creditableWithholdingPln").GetDecimal());
         Assert.Equal(15m, result2025.Field("podatekZaplaconyZaGranica"));
@@ -147,7 +147,7 @@ public class WithholdingReconciliationTests
 
         // 2024: the refund is attributed to the 2024 payment, whose credit is therefore gone.
         var result2024 = await app.ImportAsync(files, taxYear: 2024);
-        Assert.Equal(HttpStatusCode.OK, result2024.Status);
+        result2024.AssertOk();
         var aapl = Assert.Single(result2024.Body.GetProperty("dividends").EnumerateArray());
         Assert.Equal(0m, aapl.GetProperty("withholdingTaxPln").GetDecimal());
         Assert.Equal(0m, result2024.Field("podatekZaplaconyZaGranica"));
@@ -168,7 +168,7 @@ public class WithholdingReconciliationTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", year2025.Build())], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(15m, result.Field("podatekZaplaconyZaGranica")); // MSFT is untouched
         var unmatched = Assert.Single(Diagnostics(result), d => d.GetProperty("code").GetString() == "UNMATCHED_WHT");
         Assert.Equal(15m, unmatched.GetProperty("unresolvedAmountPln").GetDecimal());
@@ -218,7 +218,7 @@ public class WithholdingReconciliationTests
         using var app = new PitlyApp(new Dictionary<string, decimal> { ["EUR"] = 10.51m });
         var result = await app.ImportAsync([("2025.csv", statement.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(0.1051m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(0.03m, result.Field("zryczaltowanyPodatek"));
         Assert.Equal(0.03m, result.Field("roznica"));

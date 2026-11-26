@@ -54,7 +54,7 @@ public class UploadLimitTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("two-mebibytes.csv", statement)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(20m, result.Field("dochod"));
     }
 

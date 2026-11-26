@@ -138,7 +138,10 @@ public class ImportService : IImportService
             _logger.LogInformation("Session {SessionId} saved", session.Id);
             return new ImportResult(session.Id, summary, availableYears, files.Select(f => DescribeFile(f, hashes)).ToList());
         }
-        catch (Exception ex) when (ex is FormatException or InvalidOperationException)
+        // A statement Pitly cannot calculate (missing history, a missing rate) is the user's to fix. A disposed
+        // connection or service is a failure of the server, not of the upload; ObjectDisposedException derives from
+        // InvalidOperationException, so it is excluded here and reaches the client as a server error.
+        catch (Exception ex) when (ex is FormatException or (InvalidOperationException and not ObjectDisposedException))
         {
             throw new ImportFailedException(ex.Message, availableYears, attemptedYear, ex);
         }

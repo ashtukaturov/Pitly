@@ -75,14 +75,14 @@ public class CreditRulesTests
 
         using var app = new PitlyApp();
         var treaty = await app.ImportAsync([("2025.csv", statement.Build())]);
-        Assert.Equal(HttpStatusCode.OK, treaty.Status);
+        treaty.AssertOk();
         Assert.Equal(15m, treaty.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(4m, treaty.Field("roznica"));
         Assert.Equal("TreatyCap", treaty.Pit38.GetProperty("creditMethod").GetString());
         Assert.DoesNotContain("CREDIT_METHOD", treaty.Pit38.GetProperty("diagnostics").EnumerateArray().Select(d => d.GetProperty("code").GetString()));
 
         var statutory = await app.ImportAsync([("2025.csv", statement.Build())], creditMethod: "StatutoryCap");
-        Assert.Equal(HttpStatusCode.OK, statutory.Status);
+        statutory.AssertOk();
         Assert.Equal(19m, statutory.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(0m, statutory.Field("roznica"));
         Assert.Equal("StatutoryCap", statutory.Pit38.GetProperty("creditMethod").GetString());

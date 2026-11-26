@@ -28,7 +28,7 @@ everything visual is checked in the browser.
 | `WithholdingReconciliationTests.cs` | The defects of the 2025 audit, end to end: tax on credit interest without an ISIN, a tax row for another interest period, a row of unknown kind, an excess refund on account A that leaves account B alone, a refund booked next year that stays with last year's payment (both tax years), a refund whose payment is not uploaded, dividend and interest rounding kept apart, 0.01 EUR of interest not rounded before the tax. |
 | `CreditRulesTests.cs` | The rate of the day the tax was paid, a refund netted at the original rate, interest never taking a dividend treaty rate, the statutory-cap comparison method (chosen, recorded, reopened, rejected when invalid), the rounding policy and the source-file provenance in the response. |
 | `RecheckTests.cs` | The defects of the 23 November 2026 recheck: the generic `account_id` column (per-account FIFO, assumed accounts flagged, labels, repeated uploads), one Flex `ActionID` over a dividend and a payment in lieu, the three Flex dates and a correction reported next year, the Revolut `Money in`/`Money out` and vertical-summary layouts and negative rows, Activity orders against Flex executions and netted tax rows against single rows (agreeing, conflicting, another broker never counting as coverage), each withholding at its own rate and refunds netted against the withholding they reverse, art. 63 § 1a for the base and the tax of interest per payment and the zł, gr precision of every field after a reload, an unknown treaty rate blocking instead of falling back, lending income and payments in lieu blocking until classified. |
-| `SecondRecheckTests.cs` | The findings of the 24 November 2026 recheck: a refund booked by the Activity Statement in the next year under the broker's text of the distribution (tied to its payment, the same fields as the Flex Query and their mix; several payments with the text ambiguous and flagged for their year; no text flagged for every earlier year; a text no payment carries flagged for its own year only; two same-day distributions kept apart so the treaty cap applies to each), executions left after a partial row-level match reconciled with the orders left (no false `SOURCE_CONFLICT`, a real one in either order), a conflict of a later year not blocking an earlier return, the `INTEREST_ROUNDING_LEVEL` note with both figures, the settlement and NBP rate dates on trade rows, and a year-end sale flagged for both years (`RECOGNITION_DATE`). |
+| `SecondRecheckTests.cs` | The findings of the 24 November 2026 recheck: a refund booked by the Activity Statement in the next year under the broker's text of the distribution (tied to its payment, the same fields as the Flex Query and their mix; several payments with the text ambiguous and flagged for their year; no text flagged for every earlier year; a text no payment carries flagged for its own year only; two same-day distributions kept apart so the treaty cap applies to each), executions left after a partial row-level match reconciled with the orders left (no false `SOURCE_CONFLICT`, a real one in either order), a conflict of a later year not blocking an earlier return, the `INTEREST_ROUNDING_LEVEL` note with both figures, the settlement and NBP rate dates on trade rows, a year-end sale flagged for both years (`RECOGNITION_DATE`), and from the R2 recheck the test databases opened without pooling and a disposed object answered as a server error (500), not a rejected upload (400). |
 | `FlexAndRevolutImportTests.cs` | The IB Flex Query CSV (sections, signs, accounts, unknown rows, alone and next to the Activity Statement of the same account, partial overlap, the same transaction id on two accounts, a refund linked by `ActionID` across years) and the Revolut savings statement (interest only across currencies, the summary check, unknown rows, the same result as the generic template, a repeated upload in another order). |
 | `CapitalGainsTaxCalculatorTests.cs` | FIFO matching by ISIN, commissions as costs, the buy-date rate for costs, splits, the message for missing history. |
 | `CorporateActionCalculatorTests.cs` | Reverse splits, ISIN changes, cash and stock mergers, spin-offs, cash in lieu, the opening-position check. |
@@ -47,12 +47,17 @@ everything visual is checked in the browser.
 - **`PitlyApp`** hosts the real application in-process (`WebApplicationFactory<Program>`): real endpoints,
   parsers, calculators, SQLite and schema upgrade. Only two things are replaced: exchange rates are fixed
   (USD = 4 PLN, EUR = 4.50 PLN, PLN = 1; `new PitlyApp(extraRates)` adds or overrides a rate, also per day with a
-  key such as `"EUR@2025-01-31"`) and the database is a temporary file deleted afterwards.
+  key such as `"EUR@2025-01-31"`) and the database is a temporary file deleted afterwards. The test database
+  is opened without connection pooling (`PitlyApp.ConnectionString(path)`), and no test may call
+  `SqliteConnection.ClearAllPools()`: test classes run in parallel, and clearing the process-wide pool from one
+  test disposed the open connections of others (an intermittent HTTP 400 or a host that failed to start).
+  `new PitlyApp(services => ...)` replaces services of the real application for one test.
   `ImportAsync(files, taxYear, residencyStartDate, priorYearLossesJson, accountLabelsJson, creditMethod)` posts
   multipart form data the way the browser does; `GetAsync(url)` reads a stored session. The response wrapper
   gives `Field("dochod")` for a PIT-38 field, `Pit38`, `Summary`, `Error`. The findings are in
   `Pit38.GetProperty("diagnostics")` (code, message, accountId, affectedYears, unresolvedAmountPln) and the
-  readiness in `Pit38.GetProperty("readyToFile")`.
+  readiness in `Pit38.GetProperty("readyToFile")`. `result.AssertOk()` fails with the API's own error body,
+  so a rejection that happens once in a parallel run still says why.
 - **`IbStatement`** builds an Interactive Brokers Activity Statement: `Instrument`, `Buy`, `Sell`, `Dividend`,
   `Withholding`, `Interest` (with an optional description such as `CREDIT INT FOR JAN-2025`),
   `InterestWithholding` (a Withholding Tax row without ticker or ISIN), `Split`, `OpeningPosition`,
@@ -86,7 +91,7 @@ public async Task Import_DividendTaxIsRoundedOnlyInTheDifference()
     using var app = new PitlyApp();
     var result = await app.ImportAsync([("2025.csv", statement.Build())]);
 
-    Assert.Equal(HttpStatusCode.OK, result.Status);
+    result.AssertOk();
     Assert.Equal(19.57m, result.Field("zryczaltowanyPodatek"));
     Assert.Equal(15.10m, result.Field("podatekZaplaconyZaGranica"));
     Assert.Equal(4m, result.Field("roznica"));

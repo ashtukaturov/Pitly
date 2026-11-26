@@ -3,7 +3,10 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pitly.Broker.Generic;
 using Pitly.Broker.InteractiveBrokers;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pitly.Core.Models;
+using Pitly.Core.Services;
 using Pitly.Core.Tax;
 
 namespace Pitly.Tests;
@@ -80,7 +83,7 @@ public class SecondRecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2024.csv", Activity2024()), ("2025.csv", Activity2025Refund())], taxYear: 2024);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(4.71m, result.Field("zryczaltowanyPodatek"));
         Assert.Equal(0m, result.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(5m, result.Field("roznica"));
@@ -114,7 +117,7 @@ public class SecondRecheckTests
             using var app = new PitlyApp();
             var result = await app.ImportAsync(files, taxYear: 2024);
 
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.Equal(4.71m, result.Field("zryczaltowanyPodatek"));
             Assert.Equal(0m, result.Field("podatekZaplaconyZaGranica"));
             Assert.Equal(5m, result.Field("roznica"));
@@ -140,7 +143,7 @@ public class SecondRecheckTests
         var files = new[] { ("2024.csv", Activity2024()), ("2025.csv", activity2025) };
 
         var y2025 = await app.ImportAsync(files, taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, y2025.Status);
+        y2025.AssertOk();
         Assert.Equal(4.41m, y2025.Field("zryczaltowanyPodatek"));
         Assert.Equal(3.48m, y2025.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(1m, y2025.Field("roznica"));
@@ -167,7 +170,7 @@ public class SecondRecheckTests
         using var app = new PitlyApp();
 
         var y2024 = await app.ImportAsync([("2024.csv", activity2024), ("2025.csv", activity2025)], taxYear: 2024);
-        Assert.Equal(HttpStatusCode.OK, y2024.Status);
+        y2024.AssertOk();
         Assert.Equal(9.42m, y2024.Field("zryczaltowanyPodatek"));
         Assert.Equal(7.44m, y2024.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(2m, y2024.Field("roznica"));
@@ -195,7 +198,7 @@ public class SecondRecheckTests
         using var app = new PitlyApp();
 
         var y2024 = await app.ImportAsync([("2024.csv", Activity2024()), ("2025.csv", activity2025)], taxYear: 2024);
-        Assert.Equal(HttpStatusCode.OK, y2024.Status);
+        y2024.AssertOk();
         Assert.Equal(3.72m, y2024.Field("podatekZaplaconyZaGranica"));
         var unmatched = Assert.Single(Of(y2024, DiagnosticCodes.UnmatchedWithholding));
         Assert.Equal([2024, 2025], Years(unmatched));
@@ -238,7 +241,7 @@ public class SecondRecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", activity)], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(2, result.Body.GetProperty("dividends").GetArrayLength());
         Assert.Equal(600m, result.Field("totalDividendsPln"));
         Assert.Equal(60m, result.Field("podatekZaplaconyZaGranica"));
@@ -280,7 +283,7 @@ public class SecondRecheckTests
             using var app = new PitlyApp();
             var result = await app.ImportAsync(files, taxYear: 2025);
 
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.Equal(216000m, result.Field("innePrzychody"));
             Assert.Equal(180000m, result.Field("inneKoszty"));
             Assert.Equal(6840m, result.Field("podatekNalezny"));
@@ -302,7 +305,7 @@ public class SecondRecheckTests
             using var app = new PitlyApp();
             var result = await app.ImportAsync(files, taxYear: 2025);
 
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.Equal(180000m, result.Field("inneKoszty"));
             var conflict = Assert.Single(Of(result, DiagnosticCodes.SourceConflict));
             Assert.Equal([2025], Years(conflict));
@@ -324,7 +327,7 @@ public class SecondRecheckTests
         var files = new[] { ("a2025.csv", activity2025), ("a2026.csv", activity2026), ("f2026.csv", flex2026) };
 
         var y2025 = await app.ImportAsync(files, taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, y2025.Status);
+        y2025.AssertOk();
         Assert.Equal(152m, y2025.Field("podatekNalezny"));
         Assert.DoesNotContain(DiagnosticCodes.SourceConflict, Codes(y2025));
         Assert.True(Ready(y2025));
@@ -348,7 +351,7 @@ public class SecondRecheckTests
         var two = new IbStatement(Account, 2025).Interest("2025-02-05", 0.01m, "EUR").Interest("2025-03-05", 0.01m, "EUR").Build();
         var result = await app.ImportAsync([("two.csv", two)], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(0.06m, result.Field("zryczaltowanyPodatek"));
         var note = Assert.Single(Of(result, DiagnosticCodes.InterestRoundingLevel));
         var message = note.GetProperty("message").GetString() ?? string.Empty;
@@ -390,7 +393,7 @@ public class SecondRecheckTests
             .Build();
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("flex.csv", flex)], taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.DoesNotContain(DiagnosticCodes.RecognitionDate, Codes(result));
 
         var id = result.Body.GetProperty("sessionId").GetString();
@@ -415,7 +418,7 @@ public class SecondRecheckTests
         using var app = new PitlyApp();
 
         var y2025 = await app.ImportAsync([("flex.csv", flex)], taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, y2025.Status);
+        y2025.AssertOk();
         Assert.Equal(4800m, y2025.Field("innePrzychody"));
         Assert.Equal(152m, y2025.Field("podatekNalezny"));
         var finding = Assert.Single(Of(y2025, DiagnosticCodes.RecognitionDate));
@@ -424,7 +427,7 @@ public class SecondRecheckTests
         Assert.False(Ready(y2025));
 
         var y2026 = await app.ImportAsync([("flex.csv", flex)], taxYear: 2026);
-        Assert.Equal(HttpStatusCode.OK, y2026.Status);
+        y2026.AssertOk();
         Assert.Equal(0m, y2026.Field("innePrzychody"));
         Assert.Single(Of(y2026, DiagnosticCodes.RecognitionDate));
         Assert.False(Ready(y2026));
@@ -439,7 +442,7 @@ public class SecondRecheckTests
         var late = new IbStatement(Account, 2025).Instrument("SYN", Syn)
             .Buy("SYN", "2025-03-03, 10:00:00", 10m, 100m).Sell("SYN", "2025-12-31, 10:00:00", 10m, 120m).Build();
         var flagged = await app.ImportAsync([("late.csv", late)], taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, flagged.Status);
+        flagged.AssertOk();
         var finding = Assert.Single(Of(flagged, DiagnosticCodes.RecognitionDate));
         Assert.Contains("no settlement date", finding.GetProperty("message").GetString());
         Assert.False(Ready(flagged));
@@ -458,5 +461,60 @@ public class SecondRecheckTests
         Assert.True(DatePolicy.Current.RecognitionRuleIsInterpretation);
         Assert.Contains(DatePolicy.Current.Sources, s => s.Contains("art. 17 ust. 1ab"));
         Assert.Contains("per payment", RoundingPolicy.Current.InterestRule);
+    }
+
+
+    // ── R2 (5b382d5): an intermittent HTTP 400 in a full parallel run ──
+    //
+    // Cause: every test's Dispose called SqliteConnection.ClearAllPools(), which clears the pool of the whole
+    // process. A stress run (24 workers on their own database files, one thread clearing all pools) gave 20 errors
+    // in 1346 cycles (ObjectDisposedException, DbUpdateException); without the clearing thread, 0 in 3419; with
+    // unpooled connections and the clearing thread, 0 in 1311. ObjectDisposedException derives from
+    // InvalidOperationException, which the import reported as a rejected upload (400). The test databases now open
+    // without pooling and nothing clears the shared pool; a disposed object is reported as a server error.
+
+    [Fact]
+    public void TestDatabases_AreOpenedWithoutPoolingSoNoTestClearsTheSharedPool()
+    {
+        var connectionString = PitlyApp.ConnectionString("x.db");
+        Assert.Contains("Pooling=False", connectionString, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class FailingRateService(Exception error) : INbpExchangeRateService
+    {
+        public Task<decimal> GetRateAsync(string currency, DateTime transactionDate) => throw error;
+    }
+
+    private static string GenericUsdPurchase() => new GenericTradesCsv()
+        .Buy("XB", "T1", "2025-03-03 10:00:00", "SYN", Syn, 1m, 100m).Build();
+
+    [Fact]
+    public async Task Import_DisposedObjectInsideTheCalculationIsAServerErrorNotARejectedUpload()
+    {
+        // The rate service fails as a disposed connection would. The upload itself is valid, so the answer is a
+        // server error (500), never a 400 that tells the user to fix the statement.
+        using var app = new PitlyApp(services =>
+        {
+            services.RemoveAll<INbpExchangeRateService>();
+            services.AddScoped<INbpExchangeRateService>(_ => new FailingRateService(new ObjectDisposedException("SqliteConnection")));
+        });
+        var result = await app.ImportAsync([("trades.csv", GenericUsdPurchase())], taxYear: 2025);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, result.Status);
+    }
+
+    [Fact]
+    public async Task Import_ACalculationThePitlyRulesRejectStaysABadRequest()
+    {
+        // A missing rate is a problem of the data the user can act on: it stays a 400 with the reason.
+        using var app = new PitlyApp(services =>
+        {
+            services.RemoveAll<INbpExchangeRateService>();
+            services.AddScoped<INbpExchangeRateService>(_ => new FailingRateService(new InvalidOperationException("No NBP rate for USD on 2025-03-02.")));
+        });
+        var result = await app.ImportAsync([("trades.csv", GenericUsdPurchase())], taxYear: 2025);
+
+        Assert.Equal(HttpStatusCode.BadRequest, result.Status);
+        Assert.Contains("No NBP rate", result.Error);
     }
 }

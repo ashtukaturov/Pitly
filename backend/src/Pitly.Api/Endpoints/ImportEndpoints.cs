@@ -137,8 +137,9 @@ public static class ImportEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException ex) when (ex is not ObjectDisposedException)
             {
+                // ObjectDisposedException is an InvalidOperationException too, but a server failure, not a bad request.
                 return Results.BadRequest(new { error = ex.Message });
             }
         }).DisableAntiforgery();

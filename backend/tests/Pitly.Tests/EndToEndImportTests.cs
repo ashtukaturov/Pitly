@@ -27,7 +27,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a-2024.csv", accountA.Build()), ("b-2025.csv", accountB.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(350m, result.Field("innePrzychody"));
         Assert.Equal(300m, result.Field("inneKoszty")); // a shared FIFO queue would have used A's 100 PLN lot
         Assert.Equal(50m, result.Field("dochod"));
@@ -52,7 +52,7 @@ public class EndToEndImportTests
         var result = await app.ImportAsync(
             [("a-2024.csv", accountA2024.Build()), ("b-2025.csv", accountB.Build()), ("a-2025.csv", accountA2025.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         var sells = result.Body.GetProperty("trades").EnumerateArray().Where(t => t.GetProperty("type").GetString() == "Sell").ToList();
         var saleOnA = sells.Single(t => t.GetProperty("dateTime").GetString()!.StartsWith("2025-06-02"));
         var saleOnB = sells.Single(t => t.GetProperty("dateTime").GetString()!.StartsWith("2025-03-03"));
@@ -81,7 +81,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a.csv", accountA.Build()), ("b.csv", accountB.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         var sells = result.Body.GetProperty("trades").EnumerateArray().Where(t => t.GetProperty("type").GetString() == "Sell").ToList();
         // Each account holds exactly two shares after the split, carrying the full cost of its one original share.
         Assert.Equal(100m, sells.Single(t => t.GetProperty("dateTime").GetString()!.StartsWith("2025-07-01")).GetProperty("costPln").GetDecimal());
@@ -117,7 +117,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a.csv", accountA), ("b.csv", accountB), ("b-jan-jun.csv", accountBAgain)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(2, result.Body.GetProperty("dividends").GetArrayLength());
         Assert.Equal(206m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(30.20m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());
@@ -143,7 +143,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", csv)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         var rows = result.Body.GetProperty("dividends").EnumerateArray().ToList();
         var dividend = rows.Single(r => r.GetProperty("kind").GetString() == "Dividend");
         var inLieu = rows.Single(r => r.GetProperty("kind").GetString() == "PaymentInLieu");
@@ -167,7 +167,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", year2025.Build()), ("2026.csv", year2026.Build())], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         // May: 15 - 20 < 0, so nothing is credited on it. August keeps its 15 USD = 60 PLN: the 5 USD excess is not
         // taken off it (an earlier version did that, which moved money between payments without evidence of a link).
         Assert.Equal(60m, result.Summary.GetProperty("totalCreditableWithholdingPln").GetDecimal());
@@ -186,7 +186,7 @@ public class EndToEndImportTests
         // The stored events say the same after a reload.
         var sessionId = result.Body.GetProperty("sessionId").GetString();
         var events = await app.GetAsync($"/api/session/{sessionId}/withholding-events");
-        Assert.Equal(HttpStatusCode.OK, events.Status);
+        events.AssertOk();
         var rows = events.Body.EnumerateArray().ToList();
         Assert.Equal(3, rows.Count);
         Assert.All(rows, r => Assert.Equal("Matched", r.GetProperty("status").GetString()));
@@ -207,7 +207,7 @@ public class EndToEndImportTests
 
         // No answer from the user: the files are assumed to be one account, and that assumption is reported.
         var assumed = await app.ImportAsync(files);
-        Assert.Equal(HttpStatusCode.OK, assumed.Status);
+        assumed.AssertOk();
         Assert.Equal(250m, assumed.Field("dochod")); // FIFO took the 100 PLN lot of the first file
         Assert.Contains(assumed.Strings(assumed.Pit38.GetProperty("dataWarnings")), w => w.StartsWith("Account check:"));
         Assert.All(assumed.Body.GetProperty("files").EnumerateArray(), f =>
@@ -218,7 +218,7 @@ public class EndToEndImportTests
 
         // Marked as two accounts: each keeps its own lots.
         var separate = await app.ImportAsync(files, accountLabelsJson: """{"first.csv":"1","second.csv":"2"}""");
-        Assert.Equal(HttpStatusCode.OK, separate.Status);
+        separate.AssertOk();
         Assert.Equal(50m, separate.Field("dochod"));
         Assert.DoesNotContain(separate.Strings(separate.Summary.GetProperty("warnings")), w => w.StartsWith("Account check:"));
         Assert.All(separate.Body.GetProperty("files").EnumerateArray(), f => Assert.True(f.GetProperty("accountConfirmed").GetBoolean()));
@@ -246,7 +246,7 @@ public class EndToEndImportTests
             [("jan-feb.csv", shortExport.Build()), ("jan-mar.csv", longExport.Build())],
             accountLabelsJson: """{"jan-feb.csv":"main","jan-mar.csv":"main"}""");
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(300m, result.Field("inneKoszty"));  // one purchase, not two
         Assert.Equal(350m, result.Field("innePrzychody"));
         // The dividend and the tax withheld in the same row are counted once and stay together.
@@ -271,7 +271,7 @@ public class EndToEndImportTests
             [("2025.csv", statement.Build())],
             priorYearLossesJson: """[{"year":2023,"lossPln":10000,"deductedPln":0}]""");
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(10_000m, result.Field("dochod"));
         Assert.Equal(10_000m, result.Field("stratyZLatUbieglych"));
         Assert.Equal(0m, result.Field("podstawaObliczenia"));
@@ -303,7 +303,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", statement.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(19.57m, result.Field("zryczaltowanyPodatek"));
         Assert.Equal(15.10m, result.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(4m, result.Field("roznica"));
@@ -328,7 +328,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
 
         var year2024 = await app.ImportAsync(files, taxYear: 2024);
-        Assert.Equal(HttpStatusCode.OK, year2024.Status);
+        year2024.AssertOk();
         Assert.Equal(2024, year2024.Pit38.GetProperty("year").GetInt32());
         Assert.Equal(120m, year2024.Field("innePrzychody"));
         Assert.Equal(100m, year2024.Field("inneKoszty"));
@@ -360,7 +360,7 @@ public class EndToEndImportTests
             [("statement.csv", statement.Build())],
             priorYearLossesJson: $$"""[{"year":{{lossYear}},"lossPln":400,"deductedPln":0}]""");
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(400m, result.Field("stratyZLatUbieglych"));
         var form = result.Pit38.GetProperty("form");
         Assert.Equal(version, form.GetProperty("version").GetInt32());
@@ -376,7 +376,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2026.csv", statement.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(JsonValueKind.Null, result.Pit38.GetProperty("form").ValueKind);
         Assert.Equal(19m, result.Field("podatekDoZaplaty"));
     }
@@ -395,14 +395,14 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("2025.csv", statement.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         var warning = Assert.Single(result.Strings(result.Pit38.GetProperty("dataWarnings")));
         Assert.StartsWith("Position check for 2025", warning);
         Assert.Contains("AAPL", warning);
 
         var sessionId = result.Body.GetProperty("sessionId").GetString();
         var reopened = await app.GetAsync($"/api/session/{sessionId}/pit38");
-        Assert.Equal(HttpStatusCode.OK, reopened.Status);
+        reopened.AssertOk();
         Assert.Equal(warning, Assert.Single(reopened.Strings(reopened.Body.GetProperty("dataWarnings"))));
         Assert.False(reopened.Body.GetProperty("needsReimport").GetBoolean());
     }
@@ -427,7 +427,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("generic-trades.csv", trades.Build()), ("generic-income.csv", income.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(7000m, result.Field("innePrzychody"));
         Assert.Equal(6013m, result.Field("inneKoszty"));
         Assert.Equal(987m, result.Field("dochod"));
@@ -459,7 +459,7 @@ public class EndToEndImportTests
         // The stored rows keep the country, so a reopened session carries the same attribution.
         var sessionId = result.Body.GetProperty("sessionId").GetString();
         var dividends = await app.GetAsync($"/api/session/{sessionId}/dividends");
-        Assert.Equal(HttpStatusCode.OK, dividends.Status);
+        dividends.AssertOk();
         var interest = dividends.Body.EnumerateArray().Single(d => d.GetProperty("kind").GetString() == "Interest");
         Assert.Equal("CH", interest.GetProperty("countryCode").GetString());
         var tradesPage = await app.GetAsync($"/api/session/{sessionId}/trades");
@@ -487,7 +487,7 @@ public class EndToEndImportTests
             .Sell("DEGIRO", "2", "2024-02-10 10:00:00", "AAPL", Aapl, 1m, 30m);
         var result = await app.ImportAsync([("trades.csv", oneBroker.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(20m, result.Field("dochod"));
     }
 
@@ -504,7 +504,7 @@ public class EndToEndImportTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("full.csv", full.Build()), ("partial.csv", partial.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(120m, result.Field("innePrzychody")); // the sale counts once
         Assert.Equal(20m, result.Field("dochod"));
         var warnings = result.Strings(result.Summary.GetProperty("warnings"));

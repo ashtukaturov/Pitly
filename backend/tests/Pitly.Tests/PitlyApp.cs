@@ -16,6 +16,11 @@ namespace Pitly.Tests;
 /// The real API (Program.cs: endpoints, parsers, calculators, SQLite, schema upgrade) hosted in-process for
 /// end-to-end tests. Only two things are replaced so that results are reproducible without a network:
 /// the NBP exchange rates are fixed (USD = 4 PLN, EUR = 4.50 PLN) and the database is a temporary file.
+/// The database is opened without connection pooling. xUnit runs test classes in parallel, and clearing the
+/// process-wide SQLite pool (<c>SqliteConnection.ClearAllPools</c>) from one test's Dispose disposed the open
+/// connections of other tests: their import then failed with an ObjectDisposedException (reported as HTTP 400)
+/// or their host failed to start. Without pooling nothing stays open after a request, so the file can be deleted
+/// without touching any other test's connections.
 /// </summary>
 internal sealed class PitlyApp : WebApplicationFactory<Program>
 {
@@ -28,8 +33,16 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         ["PLN"] = 1m
     };
 
+    private readonly Action<IServiceCollection>? _configureServices;
+
     public PitlyApp()
     {
+    }
+
+    /// <summary>Replaces services of the real application for one test (for example a service that fails).</summary>
+    public PitlyApp(Action<IServiceCollection> configureServices)
+    {
+        _configureServices = configureServices;
     }
 
     /// <summary>Extra fixed rates for a test; a key such as "EUR@2025-01-31" sets the rate of one day.</summary>
@@ -44,18 +57,25 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("ConnectionStrings:DefaultConnection", "Data Source=" + DatabasePath);
+        builder.UseSetting("ConnectionStrings:DefaultConnection", ConnectionString(DatabasePath));
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<INbpExchangeRateService>();
             services.AddScoped<INbpExchangeRateService>(_ => new TestRateService(_rates));
+            _configureServices?.Invoke(services);
         });
     }
+
+    /// <summary>
+    /// The connection string of a test database: no pooling, so that no test ever needs to clear the
+    /// process-wide pool that the other tests running in parallel share.
+    /// </summary>
+    public static string ConnectionString(string path)
+        => new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
 
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        SqliteConnection.ClearAllPools();
         foreach (var path in new[] { DatabasePath, DatabasePath + "-shm", DatabasePath + "-wal" })
         {
             try
@@ -75,6 +95,13 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
         public JsonElement Summary => Body.GetProperty("summary");
         public string Error => Body.GetProperty("error").GetString() ?? string.Empty;
         public decimal Field(string name) => Pit38.GetProperty(name).GetDecimal();
+
+        /// <summary>
+        /// Fails unless the API answered 200 OK, with the API's own error body in the message: an unexpected
+        /// rejection then says why, even when it happens once in a full parallel run and not when the test runs alone.
+        /// </summary>
+        public void AssertOk()
+            => Assert.True(Status == HttpStatusCode.OK, $"Expected 200 OK, got {(int)Status} {Status}: {Body.GetRawText()}");
         public List<string> Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToList();
     }
 
@@ -116,7 +143,16 @@ internal sealed class PitlyApp : WebApplicationFactory<Program>
     private static async Task<Response> ReadAsync(HttpResponseMessage response)
     {
         var text = await response.Content.ReadAsStringAsync();
-        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
-        return new Response(response.StatusCode, document.RootElement.Clone());
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
+            return new Response(response.StatusCode, document.RootElement.Clone());
+        }
+        catch (JsonException)
+        {
+            // A response that is not JSON (an unhandled error page) is kept as text, so that AssertOk can show it.
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(new { raw = text }));
+            return new Response(response.StatusCode, document.RootElement.Clone());
+        }
     }
 }

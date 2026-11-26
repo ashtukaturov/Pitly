@@ -19,9 +19,11 @@ public sealed class DbSchemaUpgraderTests : IDisposable
     private static readonly Guid TradesOnly = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid OffsetRefund = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
+    // No pooling (see PitlyApp): clearing the process-wide pool here broke the connections of tests running in parallel.
+    private string ConnectionString => PitlyApp.ConnectionString(_path);
+
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         try
         {
             File.Delete(_path);
@@ -32,11 +34,11 @@ public sealed class DbSchemaUpgraderTests : IDisposable
     }
 
     private AppDbContext NewContext()
-        => new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite("Data Source=" + _path).Options);
+        => new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(ConnectionString).Options);
 
     private void Execute(params string[] statements)
     {
-        using var connection = new SqliteConnection("Data Source=" + _path);
+        using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
         foreach (var sql in statements)
         {

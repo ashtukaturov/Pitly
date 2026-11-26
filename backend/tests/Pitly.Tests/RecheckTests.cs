@@ -72,7 +72,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a.csv", GenericA("A")), ("b.csv", GenericB("B"))], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(350m, result.Field("innePrzychody"));
         Assert.Equal(300m, result.Field("inneKoszty"));
         Assert.Equal(50m, result.Field("dochod"));
@@ -82,7 +82,7 @@ public class RecheckTests
 
         // The same two accounts in one file give the same result.
         var oneFile = await app.ImportAsync([("both.csv", GenericA("A") + GenericB("B").Split('\n', 2)[1])], taxYear: 2025);
-        Assert.Equal(HttpStatusCode.OK, oneFile.Status);
+        oneFile.AssertOk();
         Assert.Equal(300m, oneFile.Field("inneKoszty"));
         Assert.Equal(2, oneFile.Body.GetProperty("files").GetArrayLength());
     }
@@ -99,7 +99,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("same.csv", a), ("same.csv", b)], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Contains("ACCOUNT_ASSUMED", Codes(result));
         Assert.False(Ready(result));
         var files = result.Body.GetProperty("files").EnumerateArray().ToList();
@@ -110,7 +110,7 @@ public class RecheckTests
         var names = files.Select(f => f.GetProperty("name").GetString()!).ToList();
         var labels = JsonSerializer.Serialize(new Dictionary<string, string> { [names[0]] = "first", [names[1]] = "second" });
         var separated = await app.ImportAsync([("same.csv", a), ("same.csv", b)], taxYear: 2025, accountLabelsJson: labels);
-        Assert.Equal(HttpStatusCode.OK, separated.Status);
+        separated.AssertOk();
         Assert.Equal(300m, separated.Field("inneKoszty"));
         Assert.True(Ready(separated));
     }
@@ -122,7 +122,7 @@ public class RecheckTests
         var once = await app.ImportAsync([("b.csv", GenericB("B"))], taxYear: 2025);
         var twice = await app.ImportAsync([("b.csv", GenericB("B")), ("b-again.csv", GenericB("B"))], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, twice.Status);
+        twice.AssertOk();
         Assert.Equal(once.Field("innePrzychody"), twice.Field("innePrzychody"));
         Assert.Equal(once.Field("inneKoszty"), twice.Field("inneKoszty"));
         Assert.Contains("OVERLAP_SKIPPED", Codes(twice));
@@ -149,7 +149,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("flex.csv", FlexDividendAndPaymentInLieu())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(100m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Equal(15m, result.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(4m, result.Field("roznica"));
@@ -234,7 +234,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("flex.csv", FlexLateRefund())], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(10m, result.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(9m, result.Field("roznica"));
         var crossYear = Assert.Single(Diagnostics(result), d => d.GetProperty("code").GetString() == "CROSS_YEAR_ADJUSTMENT");
@@ -263,7 +263,7 @@ public class RecheckTests
         using var app = new PitlyApp(new Dictionary<string, decimal> { ["USD@2025-07-01"] = 4.2m });
         var result = await app.ImportAsync([("flex.csv", csv)], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(68.4m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());
         Assert.Contains("RATE_DATE", Codes(result));
         Assert.Contains("CROSS_YEAR_ADJUSTMENT", Codes(result));
@@ -304,7 +304,7 @@ public class RecheckTests
         using var app = new PitlyApp(new Dictionary<string, decimal> { ["EUR"] = 10.51m });
         var result = await app.ImportAsync([("savings.csv", RevolutMoneyInOut)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(0.1051m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
     }
 
@@ -316,7 +316,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("savings.csv", RevolutVerticalSummary)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(1m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.Contains("SUMMARY_MISMATCH", Codes(result));
         Assert.False(Ready(result));
@@ -369,7 +369,7 @@ public class RecheckTests
 
         foreach (var result in new[] { activity, flex, both, reversed })
         {
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.Equal(1600m, result.Field("innePrzychody"));
             Assert.Equal(1040m, result.Field("inneKoszty"));
             Assert.Equal(106m, result.Field("podatekNalezny"));
@@ -393,7 +393,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("activity.csv", ActivityHistory().Build()), ("flex.csv", flex.Build())], taxYear: 2025);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(1600m, result.Field("innePrzychody"));   // one sale, not two
         Assert.Equal(1080m, result.Field("inneKoszty"));      // one purchase, the fuller file's figures
         Assert.Contains("SOURCE_CONFLICT", Codes(result));
@@ -424,7 +424,7 @@ public class RecheckTests
 
         foreach (var (label, result) in new[] { ("activity", activity), ("flex", flex), ("mixed", mixed), ("flexAllYears", flexAllYears) })
         {
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.True(40m == result.Summary.GetProperty("totalWithholdingPln").GetDecimal(), label + ": " + result.Summary.GetProperty("totalWithholdingPln").GetDecimal() + " " + string.Join(",", Codes(result)));
             Assert.Equal(40m, result.Field("podatekZaplaconyZaGranica"));
             Assert.DoesNotContain("EXCESS_REFUND", Codes(result));
@@ -449,7 +449,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("a2024.csv", activity2024.Build()), ("a2025.csv", activity2025.Build()), ("f2024.csv", flex2024.Build()), ("f2025.csv", flex2025.Build())], taxYear: 2024);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(40m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());   // 15 - 5, once
         Assert.Contains("SOURCE_CONFLICT", Codes(result));
         Assert.False(Ready(result));
@@ -469,7 +469,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("activity.csv", activity.Build()), ("revolut.csv", revolut)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(401.5m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         Assert.DoesNotContain("SOURCE_CONFLICT", Codes(result));
         Assert.DoesNotContain("OVERLAP_SKIPPED", Codes(result));
@@ -499,7 +499,7 @@ public class RecheckTests
 
         foreach (var result in new[] { a, b })
         {
-            Assert.Equal(HttpStatusCode.OK, result.Status);
+            result.AssertOk();
             Assert.Equal(65m, result.Summary.GetProperty("totalWithholdingPln").GetDecimal());
             Assert.Equal(60m, result.Field("podatekZaplaconyZaGranica"));   // capped at 15% of 400 PLN
         }
@@ -553,7 +553,7 @@ public class RecheckTests
         using var app = new PitlyApp(new Dictionary<string, decimal> { ["EUR"] = 10.51m });
         var result = await app.ImportAsync([("income.csv", generic)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(0.1051m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());   // the audit keeps the exact gross
         Assert.Equal(0.03m, result.Field("zryczaltowanyPodatek"));
         Assert.Equal(0.03m, result.Field("roznica"));
@@ -586,7 +586,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("activity.csv", activity.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(0.015m, result.Summary.GetProperty("totalCreditableWithholdingPln").GetDecimal());   // exact in the summary
         Assert.Equal(0.02m, result.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(19m, result.Field("zryczaltowanyPodatek"));
@@ -595,7 +595,7 @@ public class RecheckTests
 
         // The stored session gives the same fields back.
         var reloaded = await app.GetAsync("/api/session/" + result.Body.GetProperty("sessionId").GetString() + "/pit38");
-        Assert.Equal(HttpStatusCode.OK, reloaded.Status);
+        reloaded.AssertOk();
         foreach (var field in new[] { "zryczaltowanyPodatek", "podatekZaplaconyZaGranica", "roznica", "podatekDoZaplaty" })
             Assert.Equal(result.Field(field), reloaded.Body.GetProperty(field).GetDecimal());
     }
@@ -636,7 +636,7 @@ public class RecheckTests
         var treaty = await app.ImportAsync([("income.csv", generic)]);
         var statutory = await app.ImportAsync([("income.csv", generic)], creditMethod: "StatutoryCap");
 
-        Assert.Equal(HttpStatusCode.OK, treaty.Status);
+        treaty.AssertOk();
         Assert.Equal(0m, treaty.Field("podatekZaplaconyZaGranica"));
         Assert.Equal(19m, treaty.Field("roznica"));
         var finding = Assert.Single(Diagnostics(treaty), d => d.GetProperty("code").GetString() == "TREATY_RATE_UNKNOWN");
@@ -667,7 +667,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("income.csv", generic)]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Contains("TREATY_RATE_UNKNOWN", Codes(result));
         Assert.False(Ready(result));
     }
@@ -686,7 +686,7 @@ public class RecheckTests
         using var app = new PitlyApp();
         var result = await app.ImportAsync([("activity.csv", activity.Build())]);
 
-        Assert.Equal(HttpStatusCode.OK, result.Status);
+        result.AssertOk();
         Assert.Equal(440m, result.Summary.GetProperty("totalDividendsPln").GetDecimal());
         var finding = Assert.Single(Diagnostics(result), d => d.GetProperty("code").GetString() == "CLASSIFICATION_UNVERIFIED");
         Assert.Equal(40m, finding.GetProperty("unresolvedAmountPln").GetDecimal());
